@@ -1,0 +1,949 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TangStash</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700;12..96,800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink: #0A0E17;
+    --ink-2: #10151F;
+    --ink-3: #171D2B;
+    --line: #262E40;
+    --gold: #D4A44C;
+    --gold-soft: #E8C77E;
+    --teal: #35D0C4;
+    --coral: #E8694F;
+    --text: #ECEEF3;
+    --text-dim: #8A93A6;
+    --text-faint: #545E75;
+    --disp: 'Bricolage Grotesque', sans-serif;
+    --body: 'Inter', sans-serif;
+    --mono: 'JetBrains Mono', monospace;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  body{
+    background: #04060a;
+    font-family: var(--body);
+    color: var(--text);
+    display:flex;
+    justify-content:center;
+    padding: 40px 16px;
+    min-height:100vh;
+  }
+  .device{
+    width: 390px;
+    max-width:100%;
+    background: var(--ink);
+    border-radius: 40px;
+    border: 10px solid #000;
+    box-shadow: 0 40px 80px -20px rgba(0,0,0,0.7), 0 0 0 1px #1a1a1a;
+    overflow:hidden;
+    position:relative;
+  }
+  .statusbar{
+    display:flex; justify-content:space-between; align-items:center;
+    padding: 14px 24px 6px;
+    font-size:13px; font-weight:600; color:var(--text);
+    font-family: var(--mono);
+  }
+  .screen{
+    height: 760px;
+    overflow-y:auto;
+    padding-bottom: 90px;
+    scrollbar-width:none;
+  }
+  .screen::-webkit-scrollbar{display:none;}
+  .screen{display:none;}
+  .screen.active{display:block;}
+
+  /* ---- shared header ---- */
+  .app-header{
+    padding: 18px 22px 14px;
+    display:flex; align-items:center; justify-content:space-between;
+  }
+  .wordmark{
+    font-family: var(--disp);
+    font-weight:800;
+    font-size: 22px;
+    letter-spacing:-0.02em;
+    display:flex; align-items:center; gap:8px;
+  }
+  .wordmark .dot{
+    width:8px; height:8px; border-radius:50%;
+    background: var(--gold);
+    box-shadow: 0 0 10px 2px rgba(212,164,76,0.6);
+  }
+  .icon-btn{
+    width:36px; height:36px; border-radius:12px;
+    background: var(--ink-3); border:1px solid var(--line);
+    display:flex; align-items:center; justify-content:center;
+    color: var(--text-dim);
+  }
+
+  /* ---- dashboard ---- */
+  .section-label{
+    font-family: var(--mono);
+    font-size:11px; letter-spacing:0.12em; text-transform:uppercase;
+    color: var(--text-faint);
+    padding: 0 22px;
+    margin: 22px 0 10px;
+  }
+  .hero-card{
+    margin: 0 22px 4px;
+    background: linear-gradient(135deg, var(--ink-3) 0%, #12192a 100%);
+    border:1px solid var(--line);
+    border-radius:20px;
+    padding:20px;
+    position:relative;
+    overflow:hidden;
+  }
+  .hero-card::after{
+    content:'';
+    position:absolute; top:-40px; right:-40px;
+    width:140px; height:140px; border-radius:50%;
+    background: radial-gradient(circle, rgba(212,164,76,0.18), transparent 70%);
+  }
+  .hero-label{ font-size:12px; color:var(--text-dim); font-weight:500; }
+  .hero-value{
+    font-family: var(--disp); font-weight:800; font-size:34px;
+    letter-spacing:-0.02em; margin-top:4px;
+  }
+  .hero-sub{
+    display:flex; gap:14px; margin-top:14px;
+  }
+  .hero-chip{
+    font-family: var(--mono); font-size:12px;
+    background: rgba(53,208,196,0.1); color: var(--teal);
+    border:1px solid rgba(53,208,196,0.25);
+    padding:4px 10px; border-radius:8px;
+    font-weight:600;
+  }
+  .hero-chip.down{ background: rgba(232,105,79,0.1); color: var(--coral); border-color: rgba(232,105,79,0.25);}
+
+  .stat-grid{
+    display:grid; grid-template-columns: 1fr 1fr; gap:10px;
+    padding: 0 22px; margin-top:14px;
+  }
+  .stat-card{
+    background: var(--ink-2); border:1px solid var(--line); border-radius:16px;
+    padding:14px;
+  }
+  .stat-num{ font-family: var(--disp); font-weight:700; font-size:22px; }
+  .stat-name{ font-size:11.5px; color:var(--text-dim); margin-top:2px; }
+
+  .row-card{
+    margin: 0 22px 10px;
+    background: var(--ink-2); border:1px solid var(--line); border-radius:16px;
+    padding:12px 14px;
+    display:flex; align-items:center; gap:12px;
+  }
+  .thumb{
+    width:40px; height:56px; border-radius:6px;
+    background: linear-gradient(160deg, #2a2f3f, #171a24);
+    border:1px solid var(--line);
+    flex-shrink:0;
+    position:relative;
+  }
+  .thumb::after{
+    content:''; position:absolute; inset:6px;
+    border:1px solid rgba(212,164,76,0.35); border-radius:3px;
+  }
+  .row-title{ font-size:13.5px; font-weight:600; }
+  .row-sub{ font-size:11.5px; color:var(--text-dim); font-family:var(--mono); margin-top:2px;}
+  .row-value{ margin-left:auto; text-align:right; }
+  .row-value .amt{ font-family:var(--mono); font-weight:700; font-size:13.5px; }
+  .row-value .chg{ font-size:11px; color: var(--teal); font-family:var(--mono); }
+  .row-value .chg.down{ color: var(--coral); }
+
+  /* ---- inventory ---- */
+  .search-bar{
+    margin: 6px 22px 14px;
+    background: var(--ink-2); border:1px solid var(--line); border-radius:14px;
+    padding: 11px 14px; display:flex; align-items:center; gap:10px;
+    color: var(--text-faint); font-size:13.5px;
+  }
+
+  /* ---- filter dropdowns ---- */
+  .filter-row{
+    display:flex; gap:8px; padding: 0 22px 14px;
+    overflow-x:auto; scrollbar-width:none; -ms-overflow-style:none;
+  }
+  .filter-row::-webkit-scrollbar{ display:none; }
+  .filter-item{ position:relative; flex-shrink:0; }
+  .filter-pill{
+    font-family:var(--mono); font-size:11px; white-space:nowrap;
+    padding:7px 12px; border-radius:100px; border:1px solid var(--line);
+    color: var(--text-dim); cursor:pointer; display:flex; align-items:center; gap:4px;
+  }
+  .filter-pill::after{ content:'▾'; font-size:9px; color:var(--text-faint); }
+  .filter-pill.active-filter{
+    border-color: var(--gold); color: var(--gold); font-weight:700;
+  }
+  .filter-dropdown{
+    display:none; position:absolute; top:36px; left:0; z-index:30;
+    background: var(--ink-3); border:1px solid var(--line); border-radius:12px;
+    padding:6px; min-width:150px; max-height:220px; overflow-y:auto;
+    box-shadow: 0 12px 30px rgba(0,0,0,0.45);
+  }
+  .filter-dropdown.open{ display:block; }
+  .filter-option{
+    padding: 8px 10px; border-radius:8px; font-size:12.5px; color: var(--text-dim); cursor:pointer;
+  }
+  .filter-option:hover{ background: var(--ink-2); }
+  .filter-option.selected{ color: var(--gold); font-weight:700; }
+
+  .inv-loading{
+    margin: 20px 22px; text-align:center; color: var(--text-faint);
+    font-size:13px; font-family: var(--body);
+  }
+
+  .inv-item{
+    margin:0 22px 10px;
+    background: var(--ink-2); border:1px solid var(--line); border-radius:16px;
+    padding:12px; display:flex; gap:12px; align-items:center;
+  }
+  .inv-thumb{
+    width:46px; height:64px; border-radius:6px; flex-shrink:0;
+    background: linear-gradient(160deg, #262c3d, #12151d);
+    border:1px solid var(--line); position:relative;
+  }
+  .inv-thumb::after{
+    content:''; position:absolute; inset:6px;
+    border:1px solid rgba(53,208,196,0.3); border-radius:3px;
+  }
+  .rarity-tag{
+    position:absolute; bottom:-6px; left:50%; transform:translateX(-50%);
+    font-family:var(--mono); font-size:8px; font-weight:700;
+    background: var(--gold); color:#1a1300;
+    padding:1px 5px; border-radius:4px; white-space:nowrap;
+  }
+  .inv-mid{ flex:1; min-width:0; }
+  .inv-name{ font-size:13.5px; font-weight:600; }
+  .inv-meta{ font-size:11px; color:var(--text-dim); font-family:var(--mono); margin-top:3px; }
+  .inv-qty-badge{
+    font-family:var(--mono); font-size:10.5px; color:var(--text-dim);
+    background: var(--ink-3); border:1px solid var(--line);
+    padding:2px 7px; border-radius:6px; margin-top:6px; display:inline-block;
+  }
+  .inv-right{ text-align:right; }
+  .inv-price{ font-family:var(--mono); font-weight:700; font-size:13.5px; }
+  .inv-pl{ font-family:var(--mono); font-size:10.5px; color:var(--teal); margin-top:2px; }
+  .inv-pl.down{ color:var(--coral); }
+
+  /* ---- binder ---- */
+  .binder-switcher{
+    display:flex; gap:8px; padding: 4px 22px 16px;
+    overflow-x:auto; scrollbar-width:none; -ms-overflow-style:none;
+  }
+  .binder-switcher::-webkit-scrollbar{ display:none; }
+  .binder-pill{
+    flex-shrink:0; font-family:var(--body); font-size:12px; font-weight:600;
+    padding:8px 14px; border-radius:100px; border:1px solid var(--line);
+    color: var(--text-dim); white-space:nowrap; cursor:pointer;
+  }
+  .binder-pill.active{
+    background: var(--gold); color:#1a1300; border-color:var(--gold);
+  }
+  .binder-pill.auto:not(.active){ border-style:dashed; }
+  .new-binder-pill{
+    color: var(--teal); border-color: rgba(53,208,196,0.35); border-style:dashed;
+  }
+  .binder-view{ display:none; }
+  .binder-view.active{ display:block; }
+  .auto-binder-note{
+    margin: 0 22px 14px; font-size:11.5px; color:var(--text-faint); line-height:1.5;
+  }
+  .slot.auto-empty{ opacity:0.35; }
+
+  .select-row{
+    display:flex; align-items:center; justify-content:space-between;
+    padding: 0 22px; margin-bottom:2px;
+  }
+  .select-toggle{
+    font-family:var(--mono); font-size:11px; color:var(--teal);
+    border:1px solid rgba(53,208,196,0.3); padding:5px 11px; border-radius:100px;
+    cursor:pointer;
+  }
+  .select-toggle.active{ background: var(--teal); color:#04201d; font-weight:700; border-color:var(--teal); }
+
+  .selectable-row{
+    display:flex; align-items:center; gap:0;
+    margin: 0 22px 10px;
+  }
+  .select-check{
+    display:none; width:20px; height:20px; border-radius:6px;
+    border:1.5px solid var(--line); background:var(--ink-2);
+    margin-right:8px; flex-shrink:0; cursor:pointer; position:relative;
+  }
+  .select-mode .select-check{ display:block; }
+  .select-check.checked{
+    background: var(--gold); border-color: var(--gold);
+  }
+  .select-check.checked::after{
+    content:'✓'; position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    font-size:12px; color:#1a1300; font-weight:900;
+  }
+
+  .bulk-action-bar{
+    display:none; position:sticky; bottom:84px; margin: 6px 22px 0;
+    background: var(--ink-3); border:1px solid var(--line); border-radius:14px;
+    padding:10px 14px; align-items:center; justify-content:space-between;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+  }
+  .bulk-action-bar.visible{ display:flex; }
+  .bulk-count{ font-family:var(--mono); font-size:11.5px; color:var(--text-dim); }
+  .bulk-btns{ display:flex; gap:8px; }
+  .bulk-btn{
+    font-family:var(--body); font-weight:700; font-size:11.5px;
+    border:none; border-radius:9px; padding:8px 12px; cursor:pointer;
+  }
+  .bulk-btn.wanted{ background: var(--ink-2); color: var(--text-dim); border:1px solid var(--line); }
+  .bulk-btn.delivered{ background: var(--gold); color:#1a1300; }
+
+  .toast{
+    position:absolute; bottom:100px; left:50%; transform: translateX(-50%) translateY(10px);
+    background: var(--ink-3); border:1px solid var(--line); border-radius:12px;
+    padding:11px 16px; font-size:12px; color:var(--text); max-width:300px; text-align:center;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.45);
+    opacity:0; pointer-events:none; transition: all 0.25s ease; z-index:60;
+  }
+  .toast.visible{ opacity:1; transform: translateX(-50%) translateY(0); }
+
+  .binder-header{
+    padding: 4px 22px 14px; display:flex; align-items:center; justify-content:space-between;
+  }
+  .binder-nav-btn{
+    width:34px; height:34px; border-radius:10px;
+    background: var(--ink-3); border:1px solid var(--line);
+    display:flex; align-items:center; justify-content:center; color:var(--text-dim);
+  }
+  .page-label{ font-family:var(--disp); font-weight:700; font-size:15px; }
+  .page-sub{ font-family:var(--mono); font-size:10.5px; color:var(--text-faint); text-align:center; margin-top:1px;}
+
+  .binder-page{
+    margin: 0 18px;
+    background: linear-gradient(160deg, #12161f, #0d1017);
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    padding: 14px;
+    box-shadow: inset 0 0 40px rgba(0,0,0,0.4);
+  }
+  .binder-grid{
+    display:grid; grid-template-columns: repeat(3, 1fr);
+    gap:8px;
+  }
+  .slot{
+    aspect-ratio: 2.5 / 3.5;
+    border-radius:8px;
+    background: var(--ink-2);
+    border: 1px solid var(--line);
+    position:relative;
+    overflow:hidden;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .slot.filled{
+    background: linear-gradient(150deg, #262c3d 0%, #171b26 60%, #0e1119 100%);
+    border-color: rgba(212,164,76,0.3);
+  }
+  .slot.filled::before{
+    content:''; position:absolute; inset:5px;
+    border:1px solid rgba(212,164,76,0.25); border-radius:5px;
+  }
+  .slot-num{
+    position:absolute; top:3px; left:5px;
+    font-family:var(--mono); font-size:8px; color: var(--text-faint);
+  }
+  .slot.empty .slot-num{ color: #2a3040; }
+  .slot-icon{ color: rgba(236,238,243,0.15); font-size:18px; }
+  .slot-footer{
+    position:absolute; bottom:3px; left:4px; right:4px;
+    display:flex; align-items:flex-end; justify-content:space-between; gap:3px;
+  }
+  .slot-rarity-tag{
+    font-family:var(--mono); font-size:7px; font-weight:700;
+    background: rgba(212,164,76,0.85); color:#1a1300;
+    padding:1px 4px; border-radius:3px; flex-shrink:0;
+  }
+  .slot-prices{
+    display:flex; flex-direction:column; align-items:flex-end; line-height:1.2;
+  }
+  .slot-price-purchase{ font-family:var(--mono); font-size:6px; color:var(--text-faint); }
+  .slot-price-market{ font-family:var(--mono); font-size:7.5px; font-weight:700; color:var(--gold-soft); }
+
+  .binder-page{ position:relative; touch-action: pan-y; user-select:none; }
+  .swipe-hint{
+    text-align:center; font-family:var(--mono); font-size:9px; color:var(--text-faint);
+    margin-top:10px; letter-spacing:0.05em;
+  }
+  .binder-nav-btn.disabled{ opacity:0.3; pointer-events:none; }
+
+  /* ---- bottom nav ---- */
+  .bottom-nav{
+    position:absolute; bottom:0; left:0; right:0;
+    height:82px;
+    background: rgba(16,21,31,0.92);
+    backdrop-filter: blur(12px);
+    border-top: 1px solid var(--line);
+    display:flex; align-items:flex-start; justify-content:space-around;
+    padding-top:12px;
+  }
+  .nav-item{
+    display:flex; flex-direction:column; align-items:center; gap:5px;
+    color: var(--text-faint);
+    font-size:10.5px; font-family:var(--body); font-weight:600;
+  }
+  .nav-item.active{ color: var(--gold); }
+  .nav-icon{ width:22px; height:22px; }
+  .nav-item.center .nav-icon-wrap{
+    width:42px; height:42px; border-radius:14px;
+    background: linear-gradient(135deg, var(--gold), var(--gold-soft));
+    display:flex; align-items:center; justify-content:center;
+    margin-top:-22px;
+    box-shadow: 0 8px 20px -4px rgba(212,164,76,0.5);
+  }
+  .nav-item.center .nav-icon-wrap svg{ color:#1a1300; }
+  .nav-item.center{ color: var(--text-dim); }
+
+  /* ---- demo controls (outside device) ---- */
+  .controls{
+    display:flex; gap:8px; justify-content:center; margin-top:20px;
+  }
+  .ctrl-btn{
+    font-family: var(--body); font-size:13px; font-weight:600;
+    padding:9px 16px; border-radius:10px;
+    background: var(--ink-2); border:1px solid var(--line);
+    color: var(--text-dim); cursor:pointer;
+    transition: all 0.15s ease;
+  }
+  .ctrl-btn.active{ background: var(--gold); color:#1a1300; border-color:var(--gold); }
+  .wrap{ display:flex; flex-direction:column; align-items:center; }
+  .caption{
+    font-family: var(--mono); font-size:11px; color:#4a5268; margin-top:14px; text-align:center; max-width:390px;
+  }
+
+  /* ---- add card / scrape ---- */
+  .field-group{ padding: 4px 22px 0; }
+  .field-label{
+    font-family:var(--mono); font-size:10.5px; letter-spacing:0.06em; text-transform:uppercase;
+    color:var(--text-faint); margin: 14px 0 6px;
+  }
+  .last-resort-tag{
+    font-family:var(--mono); font-size:8.5px; text-transform:none; letter-spacing:0;
+    color:var(--coral); border:1px solid rgba(232,105,79,0.35); padding:1px 6px; border-radius:100px;
+    margin-left:6px;
+  }
+  .url-row{ display:flex; gap:8px; }
+  .url-input{
+    flex:1; background:var(--ink-2); border:1px solid var(--line); border-radius:12px;
+    padding:11px 12px; font-family:var(--mono); font-size:11.5px; color:var(--text);
+  }
+  .url-input::placeholder{ color:var(--text-faint); }
+  .fetch-btn{
+    background: var(--gold); color:#1a1300; border:none; border-radius:12px;
+    padding:0 16px; font-family:var(--body); font-weight:700; font-size:12.5px;
+    white-space:nowrap; cursor:pointer;
+  }
+  .fetch-btn:active{ transform: scale(0.97); }
+  .fetch-all-btn{
+    margin: 16px 22px 0; background: linear-gradient(135deg, var(--gold), var(--gold-soft));
+    color:#1a1300; border:none; border-radius:14px; padding:13px; width:calc(100% - 44px);
+    font-family:var(--body); font-weight:800; font-size:13.5px; cursor:pointer;
+    display:flex; align-items:center; justify-content:center; gap:8px;
+  }
+
+  .source-result{
+    margin: 12px 22px 0; background: var(--ink-2); border:1px solid var(--line); border-radius:16px;
+    padding:12px; display:flex; gap:12px; align-items:center;
+  }
+  .source-result.pending{ opacity:0.45; }
+  .source-thumb{
+    width:46px; height:64px; border-radius:6px; flex-shrink:0;
+    background: linear-gradient(160deg, #262c3d, #12151d); border:1px solid var(--line);
+    display:flex; align-items:center; justify-content:center; color:var(--text-faint); font-size:16px;
+  }
+  .source-name{ font-family:var(--mono); font-size:10.5px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.04em;}
+  .source-price{ font-family:var(--disp); font-weight:700; font-size:17px; margin-top:2px; }
+  .source-cond{ font-size:11px; color:var(--text-dim); margin-top:2px; }
+  .best-badge{
+    margin-left:auto; font-family:var(--mono); font-size:9.5px; font-weight:700;
+    background: rgba(53,208,196,0.12); color:var(--teal); border:1px solid rgba(53,208,196,0.3);
+    padding:3px 8px; border-radius:100px; white-space:nowrap;
+  }
+
+  .form-input{
+    width:100%; background: var(--ink-2); border:1px solid var(--line); border-radius:12px;
+    padding:11px 12px; font-family:var(--body); font-size:13px; color:var(--text);
+  }
+  .form-row{ display:flex; gap:8px; }
+  .form-row .form-input{ flex:1; }
+  .save-btn{
+    margin: 20px 22px 10px; background: var(--gold); color:#1a1300; border:none;
+    border-radius:14px; padding:14px; width:calc(100% - 44px);
+    font-family:var(--body); font-weight:800; font-size:14px; cursor:pointer;
+  }
+  .helper-note{
+    margin: 8px 22px 0; font-size:11px; color:var(--text-faint); line-height:1.5;
+  }
+
+  /* ---- price breakdown modal ---- */
+  .info-btn{
+    width:18px; height:18px; border-radius:50%;
+    background: var(--ink-3); border:1px solid var(--line);
+    color: var(--text-dim); font-family:var(--mono); font-size:10.5px; font-weight:700;
+    display:inline-flex; align-items:center; justify-content:center;
+    margin-left:6px; cursor:pointer; flex-shrink:0;
+  }
+  .price-line{ display:flex; align-items:center; justify-content:flex-end; gap:0; }
+  .modal-backdrop{
+    position:absolute; inset:0; background: rgba(4,6,10,0.72);
+    backdrop-filter: blur(3px);
+    display:none; align-items:flex-end; justify-content:center; z-index:50;
+  }
+  .modal-backdrop.open{ display:flex; }
+  .modal-sheet{
+    width:100%; background: var(--ink-2); border:1px solid var(--line);
+    border-radius: 22px 22px 0 0; padding: 18px 20px 26px;
+    box-shadow: 0 -20px 50px rgba(0,0,0,0.5);
+  }
+  .modal-handle{
+    width:36px; height:4px; border-radius:100px; background: var(--line);
+    margin: 0 auto 14px;
+  }
+  .modal-title-row{ display:flex; align-items:center; justify-content:space-between; margin-bottom:2px;}
+  .modal-title{ font-family:var(--disp); font-weight:800; font-size:17px; }
+  .modal-close{
+    width:28px; height:28px; border-radius:9px; background:var(--ink-3); border:1px solid var(--line);
+    color:var(--text-dim); display:flex; align-items:center; justify-content:center; cursor:pointer;
+  }
+  .modal-sub{ font-size:11.5px; color:var(--text-dim); font-family:var(--mono); margin-bottom:16px; }
+  .price-source-row{
+    display:flex; align-items:center; gap:12px;
+    padding: 11px 0; border-bottom: 1px solid var(--line);
+  }
+  .price-source-row:last-of-type{ border-bottom:none; }
+  .ps-dot{ width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+  .ps-dot.auto{ background: var(--teal); }
+  .ps-dot.manual{ background: var(--gold); }
+  .ps-dot.lastresort{ background: var(--coral); }
+  .ps-name{ font-size:13.5px; font-weight:600; }
+  .ps-tag{ font-size:10.5px; color:var(--text-faint); font-family:var(--mono); margin-top:1px; }
+  .ps-price{ margin-left:auto; font-family:var(--mono); font-weight:700; font-size:14.5px; }
+  .ps-price.out-of-stock{ color: var(--text-faint); font-weight:600; }
+  .ps-used-badge{
+    font-family:var(--mono); font-size:9px; font-weight:700;
+    background: rgba(53,208,196,0.12); color:var(--teal); border:1px solid rgba(53,208,196,0.3);
+    padding:3px 7px; border-radius:100px; margin-left:8px; white-space:nowrap;
+  }
+  .pm-average-row{
+    display:flex; align-items:baseline; justify-content:space-between;
+    background: var(--ink-3); border:1px solid var(--line); border-radius:14px;
+    padding:12px 14px; margin-bottom:14px;
+  }
+  .pm-average-label{ font-family:var(--mono); font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em;}
+  .pm-average-value{ font-family:var(--disp); font-weight:800; font-size:20px; color:var(--gold-soft); }
+  .modal-footnote{
+    font-size:11px; color:var(--text-faint); margin-top:14px; line-height:1.5;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="device">
+
+  <!-- DASHBOARD -->
+  <div class="screen active" id="screen-dashboard">
+    <div class="statusbar"><span>9:41</span><span>●●●●  📶  🔋</span></div>
+    <div class="app-header">
+      <div class="wordmark"><span class="dot"></span>TangStash</div>
+      <div class="icon-btn">⚙</div>
+    </div>
+
+    <div class="hero-card">
+      <div class="hero-label">Total Collection Value</div>
+      <div class="hero-value" id="dash-hero-value">S$0</div>
+      <div class="hero-sub">
+        <span class="hero-chip" id="dash-hero-profit">—</span>
+      </div>
+    </div>
+
+    <div class="stat-grid">
+      <div class="stat-card"><div class="stat-num" id="dash-stat-total">0</div><div class="stat-name">Total cards</div></div>
+      <div class="stat-card"><div class="stat-num" id="dash-stat-unique">0</div><div class="stat-name">Unique cards</div></div>
+      <div class="stat-card"><div class="stat-num" id="dash-stat-slabs">0</div><div class="stat-name">Slabs graded</div></div>
+      <div class="stat-card"><div class="stat-num" id="dash-stat-pending">0</div><div class="stat-name">Pending delivery</div></div>
+    </div>
+
+    <div class="section-label">Top by value</div>
+    <div id="dash-top-value"><div class="inv-loading" style="margin:0 22px 14px;">Loading…</div></div>
+
+    <div class="section-label">Recently added</div>
+    <div id="dash-recent"><div class="inv-loading" style="margin:0 22px 14px;">Loading…</div></div>
+
+    <div class="bottom-nav">
+      <div class="nav-item active"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-8 9 8M5 10v10h14V10"/></svg>Home</div>
+      <div class="nav-item" onclick="showScreen('inventory')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>Search</div>
+      <div class="nav-item center" onclick="showScreen('add')"><div class="nav-icon-wrap"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg></div>Add</div>
+      <div class="nav-item" onclick="showScreen('binder')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16M3 10h18"/></svg>Binder</div>
+      <div class="nav-item"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21a8 8 0 00-16 0"/><circle cx="12" cy="7" r="4"/></svg>Me</div>
+    </div>
+  </div>
+
+  <!-- INVENTORY -->
+  <div class="screen" id="screen-inventory">
+    <div class="statusbar"><span>9:41</span><span>●●●●  📶  🔋</span></div>
+    <div class="app-header">
+      <div class="wordmark" style="font-size:18px;">Inventory</div>
+      <div class="icon-btn" onclick="triggerImport()" title="Import from xlsx">⇅</div>
+      <input type="file" id="import-file-input" accept=".xlsx" style="display:none;" onchange="handleImportFile(this)">
+    </div>
+    <div id="import-status" style="margin: 0 22px 8px; font-family:var(--mono); font-size:10.5px; color:var(--teal);"></div>
+    <div class="search-bar" style="position:relative;">
+      🔍 &nbsp;<input id="inv-search-input" oninput="onInventorySearch(this.value)" placeholder="Search by name or number…" style="background:none; border:none; outline:none; color:var(--text); font-family:var(--body); font-size:13.5px; flex:1;">
+    </div>
+    <div style="margin: -8px 22px 12px; font-family:var(--mono); font-size:10px; color:var(--text-faint);">
+      Need the import template? <a href="tangstash-import-template.xlsx" download style="color:var(--teal);">Download it here</a>.
+    </div>
+
+    <div class="filter-row" id="filter-row">
+      <div class="filter-item">
+        <div class="filter-pill" id="fp-listing" onclick="toggleFilterMenu('listing')">Listing: All</div>
+        <div class="filter-dropdown" id="fd-listing">
+          <div class="filter-option selected" onclick="selectFilter('listing','All', this)">All</div>
+          <div class="filter-option" onclick="selectFilter('listing','Purchased', this)">Purchased</div>
+          <div class="filter-option" onclick="selectFilter('listing','Pending Delivery', this)">Pending Delivery</div>
+          <div class="filter-option" onclick="selectFilter('listing','Wanted', this)">Wanted</div>
+        </div>
+      </div>
+      <div class="filter-item">
+        <div class="filter-pill" id="fp-language" onclick="toggleFilterMenu('language')">Language: All</div>
+        <div class="filter-dropdown" id="fd-language">
+          <div class="filter-option selected" onclick="selectFilter('language','All', this)">All</div>
+          <div class="filter-option" onclick="selectFilter('language','English', this)">English</div>
+          <div class="filter-option" onclick="selectFilter('language','Japanese', this)">Japanese</div>
+          <div class="filter-option" onclick="selectFilter('language','Chinese', this)">Chinese</div>
+        </div>
+      </div>
+      <div class="filter-item">
+        <div class="filter-pill" id="fp-set" onclick="toggleFilterMenu('set')">Set: All</div>
+        <div class="filter-dropdown" id="fd-set">
+          <div class="filter-option selected" onclick="selectFilter('set','All', this)">All</div>
+          <div class="filter-option" onclick="selectFilter('set','OP', this)">OP</div>
+          <div class="filter-option" onclick="selectFilter('set','ST', this)">ST</div>
+          <div class="filter-option" onclick="selectFilter('set','EB', this)">EB</div>
+          <div class="filter-option" onclick="selectFilter('set','Others', this)">Others</div>
+        </div>
+      </div>
+      <div class="filter-item">
+        <div class="filter-pill" id="fp-subset" onclick="toggleFilterMenu('subset')">Sub-Set: All</div>
+        <div class="filter-dropdown" id="fd-subset">
+          <div class="filter-option selected" onclick="selectFilter('subset','All', this)">All</div>
+          <div class="filter-option" onclick="selectFilter('subset','01', this)">01</div>
+          <div class="filter-option" onclick="selectFilter('subset','02', this)">02</div>
+          <div class="filter-option" onclick="selectFilter('subset','03', this)">03</div>
+          <div class="filter-option" onclick="selectFilter('subset','07', this)">07</div>
+          <div class="filter-option" onclick="selectFilter('subset','08', this)">08</div>
+          <div class="filter-option" onclick="selectFilter('subset','09', this)">09</div>
+        </div>
+      </div>
+      <div class="filter-item">
+        <div class="filter-pill" id="fp-rarity" onclick="toggleFilterMenu('rarity')">Rarity: All</div>
+        <div class="filter-dropdown" id="fd-rarity">
+          <div class="filter-option selected" onclick="selectFilter('rarity','All', this)">All</div>
+          <div class="filter-option" onclick="selectFilter('rarity','C', this)">C</div>
+          <div class="filter-option" onclick="selectFilter('rarity','UC', this)">UC</div>
+          <div class="filter-option" onclick="selectFilter('rarity','R', this)">R</div>
+          <div class="filter-option" onclick="selectFilter('rarity','SR', this)">SR</div>
+          <div class="filter-option" onclick="selectFilter('rarity','SEC', this)">SEC</div>
+          <div class="filter-option" onclick="selectFilter('rarity','L', this)">L</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="inv-list">
+      <div class="inv-loading">Loading inventory…</div>
+    </div>
+
+    <div class="bottom-nav">
+      <div class="nav-item" onclick="showScreen('dashboard')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-8 9 8M5 10v10h14V10"/></svg>Home</div>
+      <div class="nav-item active"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>Search</div>
+      <div class="nav-item center" onclick="showScreen('add')"><div class="nav-icon-wrap"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg></div>Add</div>
+      <div class="nav-item" onclick="showScreen('binder')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16M3 10h18"/></svg>Binder</div>
+      <div class="nav-item"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21a8 8 0 00-16 0"/><circle cx="12" cy="7" r="4"/></svg>Me</div>
+    </div>
+
+    <div class="modal-backdrop" id="price-modal" onclick="if(event.target===this) closePriceBreakdown()">
+      <div class="modal-sheet">
+        <div class="modal-handle"></div>
+        <div class="modal-title-row">
+          <div class="modal-title" id="pm-title">Card name</div>
+          <div class="modal-close" onclick="closePriceBreakdown()">✕</div>
+        </div>
+        <div class="modal-sub" id="pm-sub">OP00-000</div>
+        <div id="pm-rows"></div>
+        <div class="modal-footnote">Market price = average of Toretoku + Yuyu-tei. PriceCharting (coral) is a last resort, used only when neither has data — for Slabs, PriceCharting PSA10 is used instead. Muted prices are from listings currently out of stock or not used in the calculation.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- BINDER -->
+  <div class="screen" id="screen-binder">
+    <div class="statusbar"><span>9:41</span><span>●●●●  📶  🔋</span></div>
+    <div class="app-header">
+      <div class="wordmark" style="font-size:18px;">Binder</div>
+      <div class="icon-btn">⋮</div>
+    </div>
+
+    <div class="binder-switcher" id="binder-switcher">
+      <div class="binder-pill active" data-binder="main" onclick="switchBinder('main', this)">Main Collection</div>
+      <div class="binder-pill auto" data-binder="pending" onclick="switchBinder('pending', this)">⏳ Pending Delivery</div>
+      <div class="binder-pill auto" data-binder="wanted" onclick="switchBinder('wanted', this)">☆ Wanted</div>
+      <div class="binder-pill new-binder-pill" onclick="openNewBinderModal()">+ New Binder</div>
+    </div>
+
+    <!-- MAIN COLLECTION (manual binder) -->
+    <div class="binder-view active" id="binder-view-main">
+      <div class="binder-header">
+        <div class="binder-nav-btn" id="main-prev-btn">‹</div>
+        <div><div class="page-label" style="text-align:center;" id="main-page-label">Page 4</div><div class="page-sub" id="main-page-sub">OP-07 Red/Green</div></div>
+        <div class="binder-nav-btn" id="main-next-btn">›</div>
+      </div>
+
+      <div class="binder-page" id="main-binder-page">
+        <div class="binder-grid" id="main-binder-grid"></div>
+        <div class="swipe-hint">← swipe → · tap an empty slot to add a card</div>
+      </div>
+    </div>
+
+    <!-- PENDING DELIVERY (auto binder) -->
+    <div class="binder-view" id="binder-view-pending">
+      <div class="auto-binder-note">Auto-generated from cards marked <b>Pending Delivery</b> in Inventory — updates by itself, can't be manually rearranged.</div>
+      <div class="binder-page">
+        <div class="binder-grid"></div>
+      </div>
+
+      <div class="select-row">
+        <div class="section-label" style="padding:0; margin:0;">In this binder</div>
+        <div class="select-toggle" id="pending-select-toggle" onclick="toggleSelectMode('pending')">Select</div>
+      </div>
+
+      <div id="pending-list"><div class="inv-loading" style="margin:0 0 14px;">Loading…</div></div>
+
+      <div class="bulk-action-bar" id="pending-bulk-bar">
+        <div class="bulk-count" id="pending-bulk-count">0 selected</div>
+        <div class="bulk-btns">
+          <button class="bulk-btn wanted" onclick="bulkUpdate('pending', 'wanted')">Mark as Wanted</button>
+          <button class="bulk-btn delivered" onclick="bulkUpdate('pending', 'delivered')">Mark Delivered</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- WANTED (auto binder) -->
+    <div class="binder-view" id="binder-view-wanted">
+      <div class="auto-binder-note">Auto-generated from cards marked <b>Wanted</b> in Inventory — updates by itself, can't be manually rearranged. Tap a card to log a purchase.</div>
+      <div class="binder-page">
+        <div class="binder-grid"></div>
+      </div>
+      <div class="section-label">In this binder</div>
+      <div id="wanted-list"><div class="inv-loading" style="margin:0 0 14px;">Loading…</div></div>
+    </div>
+
+    <!-- placeholder for user-created binders -->
+    <div id="custom-binder-views"></div>
+
+    <div class="toast" id="binder-toast"></div>
+
+    <div class="bottom-nav">
+      <div class="nav-item" onclick="showScreen('dashboard')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-8 9 8M5 10v10h14V10"/></svg>Home</div>
+      <div class="nav-item" onclick="showScreen('inventory')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>Search</div>
+      <div class="nav-item center" onclick="showScreen('add')"><div class="nav-icon-wrap"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg></div>Add</div>
+      <div class="nav-item active"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16M3 10h18"/></svg>Binder</div>
+      <div class="nav-item"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21a8 8 0 00-16 0"/><circle cx="12" cy="7" r="4"/></svg>Me</div>
+    </div>
+
+    <div class="modal-backdrop" id="new-binder-modal" onclick="if(event.target===this) closeNewBinderModal()">
+      <div class="modal-sheet">
+        <div class="modal-handle"></div>
+        <div class="modal-title-row">
+          <div class="modal-title">New binder</div>
+          <div class="modal-close" onclick="closeNewBinderModal()">✕</div>
+        </div>
+        <div class="modal-sub">Manually arranged, like Main Collection</div>
+        <input class="form-input" id="new-binder-name" placeholder="e.g. For Trade, OP-09 Set" style="margin-top:4px;">
+        <button class="save-btn" style="margin:16px 0 4px; width:100%;" onclick="createBinder()">Create binder</button>
+      </div>
+    </div>
+
+    <div class="modal-backdrop" id="purchase-modal" onclick="if(event.target===this) closePurchaseModal()">
+      <div class="modal-sheet">
+        <div class="modal-handle"></div>
+        <div class="modal-title-row">
+          <div class="modal-title" id="purchase-modal-title">Card name</div>
+          <div class="modal-close" onclick="closePurchaseModal()">✕</div>
+        </div>
+        <div class="modal-sub" id="purchase-modal-sub">OP00-000</div>
+        <div class="field-label" style="padding:0; margin-top:10px;">Purchase price</div>
+        <div class="form-row">
+          <input class="form-input" id="purchase-price-input" placeholder="0.00" style="flex:1;">
+          <input class="form-input" id="purchase-currency-input" value="JPY" style="flex:0 0 80px;">
+        </div>
+        <div class="modal-footnote" style="margin-top:10px;">Choose what happens once the price is saved.</div>
+        <button class="save-btn" style="margin:14px 0 8px; width:100%;" onclick="resolvePurchase('pending')">Save as Pending Delivery</button>
+        <button class="save-btn" style="margin:0 0 4px; width:100%; background:var(--teal); color:#04201d;" onclick="resolvePurchase('purchased')">Save as Purchased (in hand)</button>
+      </div>
+    </div>
+
+    <div class="modal-backdrop" id="slot-picker-modal" onclick="if(event.target===this) closeSlotPicker()">
+      <div class="modal-sheet">
+        <div class="modal-handle"></div>
+        <div class="modal-title-row">
+          <div class="modal-title">Place a card</div>
+          <div class="modal-close" onclick="closeSlotPicker()">✕</div>
+        </div>
+        <div class="modal-sub">Choose a card to fill this slot</div>
+        <input class="form-input" id="slot-picker-search" placeholder="Search by name or number…" style="margin:10px 0;" oninput="onSlotPickerSearch(this.value)">
+        <div id="slot-picker-results" style="max-height:340px; overflow-y:auto;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ADD CARD -->
+  <div class="screen" id="screen-add">
+    <div class="statusbar"><span>9:41</span><span>●●●●  📶  🔋</span></div>
+    <div class="app-header">
+      <div class="wordmark" style="font-size:18px;">Add Card</div>
+      <div class="icon-btn" onclick="resetAddCardForm(); showScreen('dashboard')" title="Cancel">✕</div>
+    </div>
+
+    <div class="field-group">
+      <div class="field-label">Toretoku listing URL</div>
+      <div class="url-row">
+        <input class="url-input" id="url-toretoku" placeholder="toretoku.jp/item/details/…">
+        <button class="fetch-btn" onclick="fetchSource('toretoku')">Fetch</button>
+      </div>
+
+      <div class="field-label">Yuyu-tei listing URL</div>
+      <div class="url-row">
+        <input class="url-input" id="url-yuyutei" placeholder="yuyu-tei.jp/sell/opc/card/…">
+        <button class="fetch-btn" onclick="fetchSource('yuyutei')">Fetch</button>
+      </div>
+
+      <div class="field-label">PriceCharting URL <span class="last-resort-tag">Last resort</span></div>
+      <div class="url-row">
+        <input class="url-input" id="url-pricecharting" placeholder="pricecharting.com/game/…">
+        <button class="fetch-btn" onclick="fetchSource('pricecharting')">Fetch</button>
+      </div>
+    </div>
+
+    <button class="fetch-all-btn" onclick="fetchAll()">⚡ Fetch price &amp; image from all</button>
+
+    <div class="section-label" style="margin-top:18px;">Results</div>
+
+    <div class="source-result pending" id="result-toretoku">
+      <div class="source-thumb">?</div>
+      <div>
+        <div class="source-name">Toretoku</div>
+        <div class="source-price">—</div>
+        <div class="source-cond">Not fetched yet</div>
+      </div>
+    </div>
+
+    <div class="source-result pending" id="result-yuyutei">
+      <div class="source-thumb">?</div>
+      <div>
+        <div class="source-name">Yuyu-tei</div>
+        <div class="source-price">—</div>
+        <div class="source-cond">Not fetched yet</div>
+      </div>
+    </div>
+
+    <div class="source-result pending" id="result-pricecharting">
+      <div class="source-thumb">?</div>
+      <div>
+        <div class="source-name">PriceCharting</div>
+        <div class="source-price">—</div>
+        <div class="source-cond">Not fetched yet</div>
+      </div>
+    </div>
+
+    <div class="helper-note">Market price = average of Toretoku + Yuyu-tei. PriceCharting is a last resort, used only when neither has data — and for Slabs, PriceCharting's PSA10 price is used as the reference instead. Image is downloaded in priority order (Toretoku → Yuyu-tei → PriceCharting) and stored in your own blob — nothing is hotlinked.</div>
+
+    <div class="section-label" style="margin-top:18px;">Card details</div>
+    <div class="field-group" style="padding-bottom:4px;">
+      <div class="form-row" style="margin-bottom:8px;">
+        <input class="form-input" id="add-card-name" placeholder="Card name">
+      </div>
+      <div class="form-row" style="margin-bottom:8px;">
+        <input class="form-input" id="add-card-number" placeholder="Card number (e.g. OP01-025)" style="flex:1;">
+        <input class="form-input" id="add-card-rarity" placeholder="Rarity" style="flex:0 0 90px;">
+      </div>
+      <div class="form-row" style="margin-bottom:8px;">
+        <select class="form-input" id="add-card-category" style="flex:1;">
+          <option value="">Category…</option>
+          <option>Leader</option><option>Character</option><option>Event</option><option>Stage</option>
+        </select>
+        <select class="form-input" id="add-foil-type" style="flex:1;">
+          <option value="">Foil type…</option>
+          <option>Foil</option><option>Non-Foil</option><option>Textured Foil</option>
+        </select>
+      </div>
+      <div class="form-row" style="margin-bottom:8px;">
+        <select class="form-input" id="add-language" style="flex:1;">
+          <option value="Japanese">Japanese</option><option>English</option><option>Chinese</option>
+        </select>
+        <select class="form-input" id="add-condition-type" style="flex:1;" onchange="document.getElementById('slab-fields').style.display = this.value === 'Slabs' ? 'flex' : 'none';">
+          <option value="Singles">Singles</option><option value="Slabs">Slabs</option>
+        </select>
+      </div>
+      <div class="form-row" id="slab-fields" style="margin-bottom:8px; display:none;">
+        <select class="form-input" id="add-grading-company" style="flex:1;">
+          <option value="">Grading co…</option>
+          <option>PSA</option><option>CGC</option><option>ARS</option>
+        </select>
+        <input class="form-input" id="add-cert-number" placeholder="Cert number" style="flex:1;">
+      </div>
+      <div class="form-row" style="margin-bottom:8px;">
+        <input class="form-input" id="add-sub-condition" placeholder="Sub-condition (e.g. PSA10, White Dot, Sealed)">
+      </div>
+      <div class="form-row" style="margin-bottom:8px;">
+        <input class="form-input" id="add-purchase-price" placeholder="Purchase price (blank = Wanted)">
+        <input class="form-input" id="add-purchase-currency" placeholder="Currency" value="JPY" style="flex:0 0 90px;">
+      </div>
+      <label style="display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--text-dim); margin-bottom:8px; padding:0 2px;">
+        <input type="checkbox" id="add-received-checkbox" checked style="width:16px; height:16px;">
+        Already received (uncheck if a price is set but the card hasn't arrived yet — Pending Delivery)
+      </label>
+      <div class="form-row">
+        <input class="form-input" id="add-image-link" placeholder="Image link (optional — fallback only)">
+      </div>
+    </div>
+
+    <div id="add-card-status" style="margin: 4px 22px 0; font-family:var(--mono); font-size:11px; color:var(--teal);"></div>
+    <button class="save-btn" onclick="saveCard()">Save to inventory</button>
+
+    <div class="bottom-nav">
+      <div class="nav-item" onclick="showScreen('dashboard')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-8 9 8M5 10v10h14V10"/></svg>Home</div>
+      <div class="nav-item" onclick="showScreen('inventory')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>Search</div>
+      <div class="nav-item center active"><div class="nav-icon-wrap"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg></div>Add</div>
+      <div class="nav-item" onclick="showScreen('binder')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16M3 10h18"/></svg>Binder</div>
+      <div class="nav-item"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21a8 8 0 00-16 0"/><circle cx="12" cy="7" r="4"/></svg>Me</div>
+    </div>
+  </div>
+
+</div>
+
+<div class="controls">
+  <button class="ctrl-btn active" onclick="showScreen('dashboard', this)">Dashboard</button>
+  <button class="ctrl-btn" onclick="showScreen('inventory', this)">Inventory</button>
+  <button class="ctrl-btn" onclick="showScreen('binder', this)">Binder</button>
+  <button class="ctrl-btn" onclick="showScreen('add', this)">Add Card</button>
+</div>
+<div class="caption">TangStash — a personal One Piece TCG collection tracker.</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

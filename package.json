@@ -1,0 +1,13 @@
+{
+  "name": "tangstash",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Personal One Piece TCG collection tracker — inventory, pricing, binder view.",
+  "scripts": {
+    "dev": "netlify dev"
+  },
+  "dependencies": {
+    "@netlify/blobs": "^8.1.0",
+    "cheerio": "^1.0.0"
+  }
+}

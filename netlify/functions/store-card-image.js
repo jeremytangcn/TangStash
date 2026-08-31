@@ -1,0 +1,130 @@
+// netlify/functions/store-card-image.js
+//
+// Takes an image URL (typically the imageUrl returned by scrape-card.js)
+// and a cardId, downloads the image bytes, and stores them in Netlify
+// Blobs under our own key — so the app never hotlinks yuyu-tei's,
+// toretoku's, or PriceCharting's CDN, and has its own durable copy.
+//
+// Usage: POST /.netlify/functions/store-card-image
+//   body: { "imageUrl": "https://card.yuyu-tei.jp/opc/front/op01/10033.jpg",
+//           "cardId": "op01-025-parallel-sr" }
+//
+// Returns: { blobKey, blobUrl, contentType, bytes }
+//
+// Image scrape priority (decided by the caller, not this function): when a
+// card has more than one listing URL, try toretoku first, then yuyu-tei,
+// then PriceCharting, and store whichever one succeeds first. This function
+// only handles a single already-chosen imageUrl per call.
+//
+// Requires the "netlify-blobs" extension/package enabled on the site
+// (npm install @netlify/blobs) — no separate credentials needed when
+// running inside a Netlify deploy or `netlify dev`, since the runtime
+// injects blob store access automatically.
+
+const { getStore } = require("@netlify/blobs");
+
+const STORE_NAME = "card-images";
+const MAX_BYTES = 8 * 1024 * 1024; // 8MB safety ceiling per image
+
+exports.handler = async (event) => {
+  if (event.httpMethod !== "POST") {
+    return respond(405, { error: "Use POST" });
+  }
+
+  let body;
+  try {
+    body = JSON.parse(event.body || "{}");
+  } catch {
+    return respond(400, { error: "Invalid JSON body" });
+  }
+
+  const { imageUrl, cardId } = body;
+  if (!imageUrl || !cardId) {
+    return respond(400, { error: "Both 'imageUrl' and 'cardId' are required" });
+  }
+
+  // Basic guard: only fetch images from hosts we actually scrape, so this
+  // endpoint can't be used as an open image-fetching proxy for anything else.
+  //
+  // PriceCharting's product photos are served from a shared Google Cloud
+  // Storage bucket (storage.googleapis.com), which also hosts countless
+  // unrelated buckets - allow-listing that hostname alone would let this
+  // endpoint fetch ANY GCS-hosted file. So for that one host we also
+  // require the path to start with the specific bucket prefix PriceCharting
+  // actually uses, and reject storage.googleapis.com URLs that don't.
+  const ALLOWED_SOURCES = [
+    { hostname: "card.yuyu-tei.jp" },
+    { hostname: "www.toretoku.jp" },
+    { hostname: "toretoku.jp" },
+    { hostname: "storage.googleapis.com", pathPrefix: "/images.pricecharting.com/" },
+  ];
+
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(imageUrl);
+  } catch {
+    return respond(400, { error: "Invalid imageUrl" });
+  }
+  const hostname = parsedUrl.hostname;
+  const isAllowed = ALLOWED_SOURCES.some(
+    (src) => src.hostname === hostname && (!src.pathPrefix || parsedUrl.pathname.startsWith(src.pathPrefix))
+  );
+  if (!isAllowed) {
+    return respond(400, { error: `Host/path not allowed: ${hostname}${parsedUrl.pathname}` });
+  }
+
+  try {
+    const imgRes = await fetch(imageUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (compatible; TangStash/1.0; personal collection tracker)",
+      },
+    });
+
+    if (!imgRes.ok) {
+      return respond(502, { error: `Image fetch failed with ${imgRes.status}` });
+    }
+
+    const contentType = imgRes.headers.get("content-type") || "image/jpeg";
+    if (!contentType.startsWith("image/")) {
+      return respond(422, { error: `Unexpected content-type: ${contentType}` });
+    }
+
+    const buffer = Buffer.from(await imgRes.arrayBuffer());
+    if (buffer.byteLength > MAX_BYTES) {
+      return respond(413, { error: `Image too large (${buffer.byteLength} bytes)` });
+    }
+
+    const ext = contentType.split("/")[1]?.split("+")[0] || "jpg";
+    const blobKey = `${cardId}.${ext}`;
+
+    const store = getStore(STORE_NAME);
+    await store.set(blobKey, buffer, {
+      metadata: {
+        sourceUrl: imageUrl,
+        sourceHost: hostname,
+        storedAt: new Date().toISOString(),
+        contentType,
+      },
+    });
+
+    // Served back out via serve-card-image.js (a small proxy function —
+    // see that file for why a proxy was chosen over a direct Blob URL).
+    return respond(200, {
+      blobKey,
+      blobUrl: `/.netlify/functions/serve-card-image?key=${encodeURIComponent(blobKey)}`,
+      contentType,
+      bytes: buffer.byteLength,
+      sourceUrl: imageUrl,
+    });
+  } catch (err) {
+    return respond(500, { error: err.message });
+  }
+};
+
+function respond(statusCode, body) {
+  return {
+    statusCode,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  };
+}

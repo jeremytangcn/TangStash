@@ -1,0 +1,14 @@
+{
+  "rarities": ["C", "UC", "R", "SR", "SEC", "L", "P", "P-SR", "SP"],
+  "categories": ["Leader", "Character", "Event", "Stage"],
+  "foilTypes": ["Foil", "Non-Foil", "Textured Foil"],
+  "languages": ["English", "Japanese", "Chinese"],
+  "purchaseCurrencies": ["SGD", "JPY", "AUD", "RMB", "MYR", "USD"],
+  "conditionTypes": ["Singles", "Slabs"],
+  "gradingCompanies": ["PSA", "CGC", "ARS"],
+  "listingStatuses": ["Purchased", "Pending Delivery", "Wanted"],
+  "notes": {
+    "listingStatus": "Not stored directly — computed from quantity + purchasePrice. quantity=1 & purchasePrice set => Purchased. quantity=0 & purchasePrice set => Pending Delivery. quantity=0 & no purchasePrice => Wanted.",
+    "defaultBaseCurrency": "SGD"
+  }
+}
