@@ -21,12 +21,17 @@
 // running inside a Netlify deploy or `netlify dev`, since the runtime
 // injects blob store access automatically.
 
-const { getStore } = require("@netlify/blobs");
+const { connectLambda, getStore } = require("@netlify/blobs");
+const { isAllowedImageUrl, imageFetchHeaders, refererForHost } = require("./lib/image-sources");
 
 const STORE_NAME = "card-images";
 const MAX_BYTES = 8 * 1024 * 1024; // 8MB safety ceiling per image
 
 exports.handler = async (event) => {
+  // Required for Netlify Blobs in classic ("Lambda compatibility mode")
+  // functions — see binders-list.js for the full explanation.
+  connectLambda(event);
+
   if (event.httpMethod !== "POST") {
     return respond(405, { error: "Use POST" });
   }
@@ -45,39 +50,17 @@ exports.handler = async (event) => {
 
   // Basic guard: only fetch images from hosts we actually scrape, so this
   // endpoint can't be used as an open image-fetching proxy for anything else.
-  //
-  // PriceCharting's product photos are served from a shared Google Cloud
-  // Storage bucket (storage.googleapis.com), which also hosts countless
-  // unrelated buckets - allow-listing that hostname alone would let this
-  // endpoint fetch ANY GCS-hosted file. So for that one host we also
-  // require the path to start with the specific bucket prefix PriceCharting
-  // actually uses, and reject storage.googleapis.com URLs that don't.
-  const ALLOWED_SOURCES = [
-    { hostname: "card.yuyu-tei.jp" },
-    { hostname: "www.toretoku.jp" },
-    { hostname: "toretoku.jp" },
-    { hostname: "storage.googleapis.com", pathPrefix: "/images.pricecharting.com/" },
-  ];
-
-  let parsedUrl;
-  try {
-    parsedUrl = new URL(imageUrl);
-  } catch {
-    return respond(400, { error: "Invalid imageUrl" });
+  // See lib/image-sources.js for the allow-list and why PriceCharting's
+  // host needs a path-prefix check on top of the hostname check.
+  const check = isAllowedImageUrl(imageUrl);
+  if (!check.allowed) {
+    return respond(400, { error: check.reason });
   }
-  const hostname = parsedUrl.hostname;
-  const isAllowed = ALLOWED_SOURCES.some(
-    (src) => src.hostname === hostname && (!src.pathPrefix || parsedUrl.pathname.startsWith(src.pathPrefix))
-  );
-  if (!isAllowed) {
-    return respond(400, { error: `Host/path not allowed: ${hostname}${parsedUrl.pathname}` });
-  }
+  const hostname = check.hostname;
 
   try {
     const imgRes = await fetch(imageUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (compatible; TangStash/1.0; personal collection tracker)",
-      },
+      headers: imageFetchHeaders(refererForHost(hostname)),
     });
 
     if (!imgRes.ok) {

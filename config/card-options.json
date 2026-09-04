@@ -1,14 +1,17 @@
 {
-  "rarities": ["C", "UC", "R", "SR", "SEC", "L", "P", "P-SR", "SP"],
-  "categories": ["Leader", "Character", "Event", "Stage"],
+  "rarities": ["C", "UC", "R", "SR", "SEC", "L", "P", "P-SR", "SP", "Don!!"],
+  "categories": ["Leader", "Character", "Event", "Stage", "Don!!"],
   "foilTypes": ["Foil", "Non-Foil", "Textured Foil"],
   "languages": ["English", "Japanese", "Chinese"],
   "purchaseCurrencies": ["SGD", "JPY", "AUD", "RMB", "MYR", "USD"],
-  "conditionTypes": ["Singles", "Slabs"],
+  "conditionTypes": ["Singles", "Slabs", "Sealed"],
   "gradingCompanies": ["PSA", "CGC", "ARS"],
   "listingStatuses": ["Purchased", "Pending Delivery", "Wanted"],
+  "colors": ["Red", "Green", "Blue", "Purple", "Black", "Yellow"],
   "notes": {
     "listingStatus": "Not stored directly — computed from quantity + purchasePrice. quantity=1 & purchasePrice set => Purchased. quantity=0 & purchasePrice set => Pending Delivery. quantity=0 & no purchasePrice => Wanted.",
-    "defaultBaseCurrency": "SGD"
+    "defaultBaseCurrency": "SGD",
+    "colorFamilyTypeCollection": "color is a fixed multi-select (see 'colors' above — cards can be dual-color, e.g. Red+Green). familyType and collection are free-text multi-value tags (no fixed list — familyType covers the game's many crew/faction 'Feature' tags, too numerous and prone-to-drift to hardcode correctly; collection is open-ended by nature). All three store as arrays even when only one value is picked, and join with ' + ' for xlsx import/export."
   }
 }
+

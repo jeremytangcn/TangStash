@@ -9,12 +9,18 @@
 //
 // Usage: GET /.netlify/functions/binders-list
 
-const { getStore } = require("@netlify/blobs");
+const { connectLambda, getStore } = require("@netlify/blobs");
 
 const STORE_NAME = "tangstash-data";
 const BINDERS_KEY = "binders-index";
 
 exports.handler = async (event) => {
+  // Required for Netlify Blobs to work in classic ("Lambda compatibility
+  // mode") functions like this one — without this, getStore() below
+  // throws MissingBlobsEnvironmentError even in production. See:
+  // https://www.npmjs.com/package/@netlify/blobs — "Lambda compatibility mode"
+  connectLambda(event);
+
   if (event.httpMethod !== "GET") {
     return respond(405, { error: "Use GET" });
   }

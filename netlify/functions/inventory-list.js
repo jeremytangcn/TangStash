@@ -11,12 +11,16 @@
 //
 // Usage: GET /.netlify/functions/inventory-list
 
-const { getStore } = require("@netlify/blobs");
+const { connectLambda, getStore } = require("@netlify/blobs");
 
 const STORE_NAME = "tangstash-data";
 const INDEX_KEY = "inventory-index";
 
 exports.handler = async (event) => {
+  // Required for Netlify Blobs in classic ("Lambda compatibility mode")
+  // functions — see binders-list.js for the full explanation.
+  connectLambda(event);
+
   if (event.httpMethod !== "GET") {
     return respond(405, { error: "Use GET" });
   }

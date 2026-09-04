@@ -189,6 +189,11 @@ Both are wired to real `inventory-save.js` POSTs in `app.js`
 
 ## 5. Pricing & Image Scraping
 
+> **⚠️ Superseded by §19: PriceCharting was removed entirely.** Everything
+> below describing PriceCharting as a source is the ORIGINAL design
+> rationale, kept as historical record — the Toretoku/Yuyu-tei content is
+> still accurate. See §19 for what actually shipped and why.
+
 ### 5.1 Sources and their roles
 
 | Source | Role | Currency | Notes |
@@ -283,6 +288,14 @@ URLs for a given card, since nothing currently catches a mismatch.
 
 ## 6. Image Storage
 
+> **⚠️ Partly superseded — see §17, §18, §19, §21.** The host allow-list
+> described below moved into a shared `lib/image-sources.js` (and lost
+> its PriceCharting entry), a new `preview-image-proxy.js` and
+> `store-external-image.js` were added, and blob keys are no longer
+> deterministic (§18 — they must be unique per store call). The core
+> "download server-side into Blobs, serve back via a proxy function"
+> shape below is still accurate.
+
 - `scrape-card.js` returns an `imageUrl` per source it successfully
   parses.
 - `store-card-image.js` takes one `imageUrl` + a `cardId`, downloads the
@@ -325,8 +338,11 @@ URLs for a given card, since nothing currently catches a mismatch.
   page number + 3×3 slot grid (slots 1–9), matching physical binder
   placement. Empty slots render blank and are tappable to open a search
   picker (`openSlotPicker()`) that assigns an unplaced card to that exact
-  page/slot. If a page's card order isn't explicitly set, fall back to
-  sorting by card number.
+  page/slot. Tapping a filled slot opens the price breakdown sheet with
+  an added **"Remove from this binder"** action (`removeCardFromBinder()`
+  — clears `binder` back to `null`, doesn't touch the card itself). If a
+  page's card order isn't explicitly set, fall back to sorting by card
+  number.
 - **Page navigation:** swipe left/right on the binder page (pointer
   events, works for touch and mouse — `setupBinderSwipe()` in `app.js`,
   works generically for whichever binder-view is active), plus ‹ ›
@@ -343,6 +359,15 @@ URLs for a given card, since nothing currently catches a mismatch.
   `binders-save.js` (a small metadata array blob — see below), so it
   survives reloads, unlike the earlier mockup's browser-session-only
   version.
+- **Deleting a custom binder:** a "🗑 Delete this binder" link under each
+  custom binder's header (`confirmDeleteBinder()` → `deleteBinder()`,
+  POSTs `{ key, delete: true }` to `binders-save.js`). Confirms first.
+  Only removes the binder's *name* from the switcher — cards that had
+  `binder.key` set to it are left as-is (not deleted, not
+  auto-unassigned) and won't show up in the slot-picker's "unplaced
+  cards" list until manually cleared. Documented trade-off in
+  `binders-save.js`'s own comment — fine for a single-user app, worth
+  revisiting only if it gets confusing in practice.
 
 **Custom binder persistence (data model):** a single JSON array blob
 (`binders-index` key, `tangstash-data` store) holding `{ key, name,
@@ -492,13 +517,10 @@ data.**
 - Price-over-time history (and therefore "biggest movers" — dropped,
   see §9)
 - Any paid API/subscription in the pricing pipeline
-- Deleting a custom binder from the UI (the backend endpoint supports it
-  — `binders-save.js` with `{ delete: true }` — but no button calls it
-  yet)
-- Reordering/removing a card already placed in a manual binder slot (you
-  can place a card into an empty slot, but there's no "remove from
-  binder" action yet — workaround: edit the record's `binder` field
-  directly, or re-import it via xlsx with a blank placement)
+- Dragging a card BETWEEN pages of the same binder (same-page
+  drag-to-reposition is supported — see §7 — but the drag gesture is
+  scoped to the visible page grid, since cross-page drag would fight
+  with the page-swipe gesture on the same surface)
 
 ---
 
@@ -534,3 +556,533 @@ actually run. In rough order of what to check first:
    from Frankfurter as expected; RMB is normalized to CNY client-side
    (see `app.js::fxCode()`) since the app's currency picker and the FX
    provider use different codes for the same currency.
+
+---
+
+## 13. Second-Pass Fixes (bug reports from a real deploy)
+
+The first handover was built with zero network access, so it hadn't run
+anywhere. This round came from actual bug reports against a live
+deploy (`tangstash.netlify.app`) and fixed several real issues:
+
+- **Root cause of "The string did not match the expected pattern"
+  errors** on both Add Card scraping AND xlsx import (two unrelated code
+  paths throwing the identical error was the tell): `fetch()` calls were
+  built from a relative path (`API_BASE = "/.netlify/functions"`), which
+  the reporting environment's webview apparently couldn't resolve.
+  Fixed by building `API_BASE` from `window.location.origin` instead.
+  Every fetch call in `app.js` now also goes through a shared
+  `apiJson()` helper for consistent, specific error messages — if this
+  wasn't the *entire* root cause, whatever's left should now surface a
+  clear message instead of a generic browser string. **Worth
+  double-checking against the live deploy that scraping and import both
+  actually work now.**
+- **xlsx template bug**: the generated template had a real-looking
+  example row baked into the actual "Cards" sheet (row 2), which would
+  silently import as a duplicate card. Fixed — the example now lives
+  only in the Legend tab as reference text. If you already have a copy
+  of the old template downloaded, re-download it from the Inventory
+  screen to get the fixed version.
+- **Removed the phone-mockup chrome** (fake bezel, fake statusbar,
+  fixed-height inner-scrolling `.screen`) in favor of a normal responsive
+  page: `.app-shell` (max-width, centered, natural document scroll) plus
+  a real `position:fixed` bottom nav/modals/toast. `showScreen()` no
+  longer takes a `btn` param — nav-item active state is driven by
+  `data-screen` attributes instead of button text-matching.
+- **Multiple images per card** (`imageBlobKeys` array, `imageBlobKey`
+  kept as `imageBlobKeys[0]` for back-compat) — a new
+  `upload-card-image.js` function accepts a base64-encoded photo
+  directly from the device (Add Card screen, "Additional photos"), since
+  a Slab's back photo is typically the user's own phone photo, not
+  something scrapeable, and `store-card-image.js`'s host allow-list
+  deliberately won't fetch arbitrary URLs.
+- **Purchase currency is now a `<select>`** (Add Card + the Wanted→
+  Purchased purchase modal), not free text — options match
+  `card-options.json`'s `purchaseCurrencies` list.
+- **Bottom nav "Search" renamed to "Inventory"**.
+- **Settings sheet** (Dashboard gear icon): dark/light theme toggle
+  (`data-theme="light"` on `<html>`, CSS variable overrides, applied
+  pre-paint via an inline `<head>` script to avoid a flash) and a
+  display-currency picker. Both persist via `localStorage` — legitimate
+  here since this is a real deployed site, not a sandboxed artifact
+  preview. Everything is still computed/stored in SGD internally
+  (`convertFromSGD()` is purely a display-time conversion inside
+  `formatMoney()`).
+- **Drag-to-reposition within a binder page** — pointer events (not
+  native HTML5 drag-and-drop, which doesn't fire reliably for touch on
+  mobile Safari) on `.slot.filled` elements, in `attachSlotDragHandlers()`.
+  A short tap still opens the price breakdown (moved out of a plain
+  `onclick` so it can be told apart from a drag by movement distance).
+  Dropping on another filled slot swaps the two cards; dropping on an
+  empty slot moves it; either action also "commits" every other card on
+  that page to an explicit `binder.page`/`binder.slot` if it was still
+  in the computed-fallback-sort state (see `pagesForBinder()`), so an
+  untouched card can't appear to jump position on the next render.
+  Same-page only — cross-page drag would conflict with the page-swipe
+  gesture on the same surface.
+
+---
+
+## 14. Third-Pass Fixes (more bug reports from the live deploy)
+
+- **PriceCharting 403s**: the old User-Agent literally self-identified as
+  a bot (`"compatible; TangStash/1.0..."`), which some basic bot-filters
+  block outright. Switched to a realistic Chrome UA + a fuller header set
+  (`buildHeaders()` in `scrape-card.js`) for all 3 scrapers. This won't
+  help against anything backed by a real challenge service (e.g.
+  Cloudflare's managed challenge) — there's no fix for that short of a
+  headless browser — but it's the right first fix and may well be enough.
+- **Toretoku "could not parse a price"** on listings that don't use the
+  ranked S/A/B/C/D table (single-print promos, mainly) — the parser only
+  ever looked for table rows. Added a fallback chain (price-labeled
+  element → bare "X,XXX円" text-scan) matching what `parseYuyuTei()`
+  already had, so a flat-price listing with no rank table now parses.
+- **New**: Card Details now has a separate "Name" (English) and
+  "Original Name" (native language) field, plus a manual-only "Artist"
+  field. `translate-text.js` auto-translates the scraped native-language
+  name into English via Google Translate's unofficial `translate_a/single`
+  endpoint (no API key, but NOT an official/stable API — see the caveat
+  comment at the top of that file; the fix if it ever breaks outright is
+  swapping in an official paid translation API, nothing else changes).
+  Translation only fires if the Name field is still empty when a scrape
+  completes, so it never overwrites something the user typed. Both new
+  fields (`cardNameOriginal`, `artist`) flow through to xlsx import/export
+  and the price breakdown sheet's subtitle line.
+
+---
+
+## 15. CRITICAL FIX — `MissingBlobsEnvironmentError` on every Blobs call
+
+**This was the actual root cause of xlsx import, inventory list/save, and
+image storage all failing** (`"MissingBlobsEnvironmentError: The
+environment has not been configured to use Netlify Blobs..."`), and it
+was a real code bug, not a deploy/account configuration issue.
+
+**Root cause:** every function here uses the classic
+`exports.handler = async (event) => {...}` signature — what Netlify's
+own docs call **"Lambda compatibility mode"**. Per `@netlify/blobs`'s own
+documentation: *"The environment is not configured automatically when
+running functions in the Lambda compatibility mode. To use Netlify
+Blobs, you must initialize the environment manually by calling the
+`connectLambda` method with the Lambda event as a parameter... immediately
+before calling `getStore`."* None of the 8 functions that call
+`getStore()` were doing this.
+
+**Fix:** every one of them now imports `connectLambda` alongside
+`getStore` and calls `connectLambda(event)` as the very first line
+inside the handler, before anything else:
+`binders-list.js`, `binders-save.js`, `fx-rate.js`, `inventory-list.js`,
+`inventory-save.js`, `serve-card-image.js`, `store-card-image.js`,
+`upload-card-image.js`. (`fx-rate.js` previously took no `event`
+parameter at all — one was added purely to have something to pass in.)
+`scrape-card.js` and `translate-text.js` don't touch Blobs, so they
+didn't need this.
+
+**If this pattern ever needs to be applied to a new function**: add
+`getStore` to any handler and forget `connectLambda(event)` first, and
+it will silently work in `netlify dev` (which doesn't need it — see the
+GitHub issue below) but throw this exact error in production. That gap
+between working locally and failing in prod is *why* this shipped
+broken in the first place, and it's the thing to double check every
+time a new Blobs-using function gets added:
+https://github.com/netlify/blobs/issues/175
+
+**This should be verified against the live deploy first**, before
+spending more time on the scraper issues (§13/§14) — with Blobs
+non-functional, cards can't be saved at all, so nothing past "fetch a
+price" was actually testable until this fix.
+
+---
+
+## 16. Scraper fixes verified against real page content
+
+Unlike every earlier round, these two fixes were made by actually
+fetching the real, live listing pages (via a web-fetch tool available in
+chat, separate from this sandbox's own no-network-access bash
+environment) rather than guessing at markup blind. Both confirmed real
+bugs, not flukes of one listing:
+
+- **Toretoku**: the real price table (verified on
+  `toretoku.jp/item/details/171978`, e.g. "A 4,280円" / "B 1,880円") is
+  NOT necessarily inside a `<table><tr>` or `.price-row`-classed element
+  — the old parser assumed one of those and found nothing on listings
+  that use a div/grid layout instead. It also had a `\b` word-boundary
+  regex bug that would silently fail to pair a rank letter with its
+  price if the cell text had no gap between them. `parseToretoku()` now
+  scans the page's full visible text directly for the
+  `<rank letter> <price>円` pattern, which works regardless of the
+  underlying markup. Verified against both a "tight spacing" and a
+  "newline-separated" reconstruction of the real text — see the inline
+  regex test in the fix's commit if this ever needs re-verifying.
+- **PriceCharting parsing** (separate from the 403 below): the real
+  price table has condition labels (Ungraded / Grade 7 / .../ PSA 10) in
+  one row and their $ values in the row directly below, aligned by
+  column position — NOT "label near its price" in raw text order, which
+  is what the old regex assumed (and would've been hundreds of
+  characters off on the real page). `parsePriceCharting()` now parses
+  the actual `<table>` structure: match a header cell's text to find its
+  column index, then read that same column index from the values row.
+  Also fixed a related latent bug this surfaced: a second, smaller
+  "estimate" table further down the same page reuses the same column
+  headers but shows `$0.00` placeholders for grades with no real data —
+  a naive scan could have grabbed that table's `$0.00` and reported it
+  as a real PSA 10 price. Zero-value matches are now treated as "no
+  data" and skipped.
+- **PriceCharting 403 — NOT fixed, and likely can't be from here.**
+  Fetching the exact same URL via the web-fetch tool (different network
+  origin than Netlify's Functions runtime) worked fine and returned the
+  real page — so the previous header fix's failure to resolve the 403 in
+  production isn't a markup/parsing problem, it's PriceCharting blocking
+  requests at the network level, almost certainly by IP range (a common
+  defense against traffic from cloud/datacenter IPs, which is exactly
+  what Netlify Functions' outbound requests come from). No amount of
+  header tweaking fixes an IP-range block. The realistic options if this
+  needs to actually work:
+  - Accept it as best-effort/unavailable, same as it's already treated
+    as a "last resort" pricing source (see §5) — Singles pricing already
+    doesn't depend on it when Toretoku/Yuyu-tei have data, and every
+    field in Add Card is manually editable regardless of scrape success.
+  - Route PriceCharting requests through a third-party scraping proxy
+    (e.g. ScraperAPI, ScrapingBee, Bright Data) that provides
+    residential/rotating IPs — requires a paid API key and account setup
+    that's a decision for whoever's running this, not something to wire
+    in silently.
+
+---
+
+## 17. More fixes: image hotlinking, and a bulk "refresh all" action
+
+- **Toretoku preview thumbnail was blank in Add Card** (even though
+  price fetched fine, and the image DOES save correctly once a card is
+  saved). Root cause: the preview thumbnail set its CSS
+  `background: url(...)` directly to the scraped `imageUrl`
+  (`toretoku.jp/img/itemMini/...`) — i.e. the **browser** fetched it
+  directly from Toretoku's own server, with the app's domain as
+  referrer. Toretoku's image server appears to reject that (common
+  anti-hotlinking measure). The actual saved copy was never affected,
+  since `store-card-image.js` fetches server-side with no referrer to
+  check against — this was purely a preview-thumbnail bug.
+  **Fixed** with a new `preview-image-proxy.js` function: the Add Card
+  preview now routes through our own domain instead of hotlinking the
+  source site directly. Not persisted to Blobs (short cache only) —
+  that still only happens on actual save, via `store-card-image.js`.
+- **Found a related latent bug while building that fix**:
+  `store-card-image.js` (the PERMANENT image-storage path, used on
+  every actual save) was still using the same self-identifying bot
+  User-Agent that had already been fixed in `scrape-card.js` — the two
+  had drifted out of sync. If any image source ever starts blocking
+  that UA the way PriceCharting blocks it on the price-fetch side, this
+  would have silently broken every future image save. Fixed by
+  extracting the allow-list AND the request headers into a shared
+  `lib/image-sources.js`, used by both `store-card-image.js` and the
+  new `preview-image-proxy.js`, so they can't drift apart again.
+- **xlsx import doesn't fetch images** (or prices) — this was already
+  documented as a known limitation (§3.3, §16.15), not a bug: import
+  only stores metadata (including the 3 source URLs), and getting a
+  price/image for each row means a live scrape per card, which isn't
+  something a bulk import should do inline. The fix is the new bulk
+  action below, which is exactly what closes that gap in one action
+  after an import.
+- **New: bulk "refresh all" action.** A "↻" icon next to the Inventory
+  screen's import icon (`refreshAllPrices()` in `app.js`) re-scrapes
+  price + image for every card that has at least one saved source URL —
+  exactly what an xlsx import leaves needing to happen next. Refactored
+  the single-card refresh (`refreshPriceFor()`, the "?" price sheet's
+  button) to share its core scrape-and-rebuild logic
+  (`buildRefreshedRecord()`) with this bulk version, so there's one
+  place that logic lives. Deliberately **sequential, not parallel** —
+  firing many simultaneous scrape requests is more likely to trip a
+  site's bot detection than pacing them one at a time, and this isn't
+  time-critical — with a single bulk `inventory-save` call at the end
+  rather than one save per card.
+
+---
+
+## 18. CRITICAL FIX — stored images never updating (bulk refresh especially)
+
+**Symptom:** bulk refresh updated prices correctly but images never
+changed — not in Inventory, not in Binder, not even for cards that had
+never shown an image before.
+
+**Root cause:** `serve-card-image.js` sets an aggressive
+`Cache-Control: public, max-age=31536000, immutable` (cache forever),
+under the documented assumption that *"a given blobKey's bytes never
+change once written."* That assumption was TRUE when the function was
+first built, but was silently broken when the refresh feature (§17) was
+added: `buildRefreshedRecord()`/`saveCard()` were generating a
+**deterministic** `tempId` from the card's `cardNumber`, specifically so
+a refresh would overwrite the same blob key in place rather than
+accumulate a new one every time. That's exactly what a "cache forever,
+immutable" response header is designed to prevent from ever being
+noticed — once any client (browser, or Netlify's own CDN edge) had
+fetched that URL once, it would keep serving the original response
+forever, no matter how many times the underlying blob was overwritten.
+
+This also meant two cards sharing the same `cardNumber` (not unusual —
+promos are often just `"P"` with no specific number, see the Inventory
+screenshot that surfaced this) would silently share/overwrite the same
+stored image.
+
+**Fix:** rather than weaken the caching (which is the *correct* header
+for genuinely immutable content), made image keys **actually** unique
+per store call. `app.js::uniqueImageId(base)` appends a
+timestamp+random suffix to every `cardId` passed to
+`store-card-image.js` / `upload-card-image.js` / `store-external-image.js`
+(§19), so every store call gets a brand-new key and the "immutable,
+cache forever" header is honest again. This does mean old blobs from
+previous saves/refreshes are simply orphaned rather than overwritten —
+acceptable storage-cost-wise at this app's scale (a personal collection
+tracker, small JPEGs), not something a cleanup job was built for.
+
+---
+
+## 19. PriceCharting removed entirely
+
+Per explicit request, after confirming (§16) that its 403 is an
+IP-level block on Netlify's infrastructure with no code-side fix
+available. Removed from:
+- `scrape-card.js` — `parsePriceCharting()` and its `PARSERS` entry gone.
+  yuyu-tei/toretoku remain, comments updated to describe the two-source
+  (not three-source) pricing model.
+- `lib/image-sources.js` — the Google Cloud Storage allow-list entry
+  (`storage.googleapis.com/images.pricecharting.com/...`) removed, since
+  nothing fetches from it anymore.
+- Add Card screen — URL field, Fetch button, and result card gone.
+- `app.js` — every `pricecharting`-keyed branch removed from
+  `computeScrapedSGD()`, `buildRawSourceEntry()`, `pickBestImageUrl()`,
+  `fetchAll()`, `buildRefreshedRecord()`'s source list, and the "eligible
+  for bulk refresh" filter.
+- xlsx import/template — "PriceCharting URL" column gone from
+  `IMPORT_COLUMN_MAP` and `build_scripts/make_template.py`.
+
+**Consequence worth knowing:** PriceCharting was the *only* source for
+Slab (graded card) reference pricing (PSA10) and the Singles
+last-resort fallback. Removing it means:
+- **Singles**: unaffected in the common case (still average of
+  Toretoku + Yuyu-tei) — just loses the last-resort fallback for the
+  rare card neither of those two has listed.
+- **Slabs**: `computeMarketPrice()` now returns `{ value: null, label:
+  "No pricing source available for Slabs" }` — Slabs have NO
+  auto-scraped reference price at all until/unless a replacement source
+  gets added. This isn't hidden or silently wrong, just genuinely empty.
+
+**Backward compatibility:** any record that already has legacy
+`rawSources.pricecharting` data (saved before this removal) still
+displays it in the price breakdown sheet, explicitly labeled "legacy —
+source removed." Nothing was deleted from existing data, and old
+records aren't broken by this — they just stop being able to refresh
+that specific source going forward.
+
+---
+
+## 20. Add Card: new fields (Sealed, Color/Family Type/Collection, Camera/Link uploads)
+
+- **Condition Type gained a third option: "Sealed"** (alongside Singles
+  and Slabs), in `card-options.json`'s `conditionTypes` and the Add Card
+  dropdown. No special pricing logic added for it — a Sealed item falls
+  through to the same "Singles" pricing path (average of
+  Toretoku/Yuyu-tei, or "No pricing data yet"), which is an honest
+  default since neither scraper targets sealed product listings; sealed
+  items are expected to be priced manually via Purchase Price.
+- **Three new card-detail fields**: Color, Family Type, Collection.
+  - **Color** is a fixed multi-select — a row of toggle chips
+    (`toggleColorChip()`) built from `card-options.json`'s new `colors`
+    list (Red/Green/Blue/Purple/Black/Yellow). Cards can be more than
+    one color (e.g. Red + Green), so this is genuinely multi-select, not
+    a dropdown.
+  - **Family Type** and **Collection** are free-text multi-value tag
+    inputs (`addTagFrom()`/`removeTag()`/`renderTagChips()`) — type a
+    value, press Enter, it becomes a removable chip; repeat for more
+    values. Deliberately NOT a fixed list like Color: Family Type covers
+    the game's many crew/faction "Feature" tags (dozens of them, e.g.
+    "Straw Hat Crew", "Supernovas", "FILM"), too numerous and prone to
+    drift to hardcode correctly without authoritative game data;
+    Collection is open-ended by nature.
+  - All three store as arrays on the record (`color`, `familyType`,
+    `collection`) even with only one value, and show up in the price
+    breakdown sheet's subtitle line. In xlsx import/export they're a
+    single cell, values joined with `" + "` (e.g. "Red + Green") — see
+    `MULTI_VALUE_FIELDS` in `app.js` and the Legend tab's notes in the
+    generated template. Color is deliberately NOT a dropdown-validated
+    column in the xlsx template even though it has a fixed list — Excel's
+    list validation only allows picking one value per cell, which can't
+    represent "Red + Green".
+- **Additional photos now has three ways to add one**, not just file
+  upload:
+  - **Upload** — unchanged, file picker (`add-extra-photos-file`).
+  - **Camera** — new: a second file input with `capture="environment"`
+    (`add-extra-photos-camera`), which opens the device's rear camera
+    directly on mobile instead of the gallery/file picker.
+  - **Image link** — new: paste a URL (`add-extra-photo-link` +
+    `addExtraPhotoLink()`). This is why `store-external-image.js` (§21)
+    exists — `store-card-image.js`'s strict scraper allow-list would
+    reject basically any URL a user would actually paste here (a Slab
+    back photo isn't hosted on Toretoku).
+  - All three feed into one unified `extraPhotos` array
+    (`{type:'file', file} | {type:'link', url}`) with a shared preview
+    row (`renderExtraPhotosPreview()`) that has a per-photo ✕ to remove
+    it before saving. At save time, `file` entries go through
+    `upload-card-image.js`, `link` entries through
+    `store-external-image.js`.
+
+---
+
+## 21. New function: `store-external-image.js`
+
+A third, deliberately more lenient image-storage path (see §20) for
+"additional photo" links the user explicitly pastes in — as opposed to
+`store-card-image.js` (strict host allow-list, for auto-scraped URLs
+nothing chose to trust) and `upload-card-image.js` (bytes come straight
+from the user's device, no URL involved at all). Guardrails that DO
+still apply here, since it's a URL-fetching endpoint reachable by anyone
+with the site password: https:// only, a basic hostname blocklist against
+localhost/private-IP ranges (not exhaustive — a real SSRF defense needs
+DNS-resolution-time checking, which a string check on the hostname can't
+do, but it blocks the obvious cases), a content-type check that the
+response is actually an image, and the same size cap as the other
+image-storage functions. Uses `uniqueImageId()`-generated keys like
+everywhere else (§18), and shares `imageFetchHeaders()` with
+`store-card-image.js` / `preview-image-proxy.js` via `lib/image-sources.js`.
+
+---
+
+## 22. Inventory: swipe-to-delete / swipe-to-clone
+
+Each Inventory row is now wrapped in a `.swipe-row` — a fixed clone
+action (teal, left) and delete action (coral, right) sit behind the
+row's normal content (`.swipe-content`), revealed by dragging the
+content left or right past a threshold. Pointer events again (not
+native HTML5 drag), same reasoning as the binder drag-to-reposition
+feature — reliable touch support needs it. `attachAllSwipeHandlers()`
+runs after every `renderInventory()`; `openSwipeRowId` tracks which row
+(if any) is currently revealed so opening a new one closes the last,
+and tapping anywhere outside an open row closes it too.
+
+- **Delete**: `confirmDeleteInventoryCard()` → confirm dialog →
+  `deleteInventoryCard()` → new `inventory-delete.js` function (POST
+  `{ id }`, filters that id out of the inventory index and re-saves the
+  array — same "read whole blob, filter, write it back" pattern as
+  everything else). Single-id only for now; no bulk-delete endpoint
+  exists yet. Doesn't clean up the deleted card's stored image blob(s)
+  — same accepted orphaned-blobs trade-off as §18.
+- **Clone**: `cloneInventoryCard()` copies the record with one
+  explicitly-requested set of resets — Quantity → 0, Purchase Price →
+  null, Purchase Currency → null, and no `id` (so `inventory-save.js`
+  mints a fresh one) — plus two resets that weren't explicitly asked for
+  but were necessary to avoid a broken result: Purchase Date (no
+  purchase has happened for the clone, so keeping the original's date
+  would misrepresent it) and binder placement (copying `binder.page`/
+  `binder.slot` literally would make both cards claim the same slot,
+  which is a rendering conflict — the clone lands unplaced instead,
+  ready to be placed via the slot picker). Net effect: a clone always
+  lands as a new **Wanted** listing — the obvious semantics for "I want
+  another copy of this card."
+
+---
+
+## 23. Binder: multi-select directly on the Pending Delivery grid
+
+Mass-select previously only worked on the list of cards below the grid
+(§4/§9). Now the 3×3 grid itself is selectable too, and both share one
+source of truth: `pendingSelectedIds` (a `Set`). Tapping a filled grid
+slot while in select mode (`pendingSelectableSlotHtml()`) toggles
+membership the same way tapping a list checkbox does
+(`toggleCardSelection()`) — selecting a card either way shows as
+selected in both places, since both re-render from the same Set on every
+toggle. Visually: a teal outline + tint on the slot, plus a small ✓
+badge (`.slot.selected` / `.slot-check-badge`). Outside select mode, the
+grid behaves exactly as before (tap opens the price breakdown). Bulk
+actions (`bulkUpdate()`) and the bulk bar count read the same Set — no
+change to what they do, just where selection can happen.
+
+---
+
+## 24. Fourth-Pass Fixes (real scraping + binder UX bugs, fixed against real pages)
+
+All of these were diagnosed against actual live pages (fetched directly,
+not guessed), same approach as §16.
+
+- **Toretoku name/image extraction was broken** on some listings —
+  confirmed against `toretoku.jp/item/details/182709`. Two separate
+  bugs, both fixed in `parseToretoku()`:
+  - **Image**: the old selector looked for an `<img src>` containing
+    "itemMini". The real image *is* at that path, but likely only
+    reaches `src` via client-side lazy-loading — a scraper that doesn't
+    execute JS can't see it. Switched to the `og:image` meta tag as
+    primary (always present in raw server HTML, confirmed on two real
+    listings), with the old `<img>` selector kept as a fallback.
+  - **Name**: the old selector grabbed the page's first `<h1>` or `<h2>`
+    — which turned out to be the SITE'S OWN HEADER ("トレカ専門店トレト
+    ク ワンピースカード販売"), not the card title, which sits in a
+    later `<h2>` after a huge category-nav block. Switched to parsing
+    the `<title>` tag instead (format is consistently "【ワンピースカ
+    ード】 &lt;name&gt; | トレカの激安通販 トレトク【公式】" — far more
+    reliable than guessing at heading order).
+- **Images silently failing to save even with a valid, allow-listed
+  URL** (confirmed: a real Yuyu-tei image URL that matched the host
+  allow-list exactly still didn't save). Root cause: `store-card-image.js`
+  never sent a `Referer` header, and these CDNs likely enforce
+  Referer-based hotlink protection (accept requests that look like they
+  came from a page on the site, reject everything else) — the same
+  general class of problem as the preview-thumbnail hotlinking bug in
+  §17, just on the permanent-save path instead of the live-preview path,
+  and silent because the failure was caught and only `console.warn`'d,
+  never shown to the user. Fixed: `lib/image-sources.js` gained
+  `refererForHost()`, and `imageFetchHeaders()` now takes an optional
+  referer to send. Applied in both `store-card-image.js` and
+  `preview-image-proxy.js`.
+- **Binder slots never showed the card's actual photo** — `slotHtml()`,
+  `manualSlotHtml()`, and `pendingSelectableSlotHtml()` only ever
+  rendered a rarity tag and price text, no image, even when the record
+  had one. Fixed by setting the slot's `background-image` to
+  `imageUrlFor(record)` when present. This needed a new scrim overlay
+  (`.slot.filled::after`, a bottom-heavy dark gradient) so the number/
+  rarity/price text stays legible over a busy photo instead of plain
+  text with no backing.
+- **Binder swipe-to-change-page was effectively broken.** Two combined
+  causes:
+  - `setupBinderSwipe()` explicitly refused to start tracking a swipe
+    if it began on a `.slot.filled` element — meant to avoid conflicting
+    with `attachSlotDragHandlers()`'s own drag-to-reposition. But cards
+    cover most of the visible grid, so almost any natural swipe attempt
+    starts on a card, meaning the exclusion ate almost every swipe
+    attempt regardless of direction.
+  - The direction mapping was also inverted from what users actually
+    expect: swipe left triggered "next page." Explicit feedback: swipe
+    RIGHT should mean next page (turning a page forward), not left.
+  - **Fixed both together**: removed the target exclusion, flipped the
+    direction (`dx > 0` → next), and resolved the conflict with
+    drag-to-reposition differently — `attachSlotDragHandlers()` now
+    requires a brief hold (`SLOT_HOLD_MS`, 180ms) before a drag arms at
+    all (visually cued by a gold outline + slight scale, `.drag-armed`),
+    the same "press and hold, then drag" pattern as rearranging
+    home-screen icons. A quick swipe never triggers the hold, so it's
+    always free to reach the page-swipe handler; a genuine hold+drag
+    sets a shared `slotDragEngaged` flag that the swipe handler checks
+    before acting, so one continuous gesture can't be interpreted as
+    both a reposition AND a page change.
+- **New: "Change card in this slot."** Previously, swapping a card
+  already placed in a binder slot for a different one took two separate
+  trips (open detail → Remove from binder → tap the now-empty slot →
+  pick a replacement). The price-breakdown sheet now has a "⇄ Change
+  card in this slot" button (only shown for manually-arranged binders,
+  same condition as "Remove from this binder") — `changeCardInSlot()`
+  clears the current occupant's placement first (same effect as Remove),
+  then immediately opens the slot picker targeted at that exact page/
+  slot. Clearing first matters: `assignCardToSlot()` doesn't check
+  whether a slot is already occupied, so skipping this step would leave
+  both cards claiming the same slot.
+- **New: full card detail view.** Tapping an Inventory row (not just its
+  "?" button, which still works too) now opens the same sheet used for
+  the price breakdown, but it's been expanded into a real detail view: a
+  status badge (Purchased/Pending Delivery/Wanted, color-coded), and a
+  `pm-details` grid covering every field the old view didn't show —
+  Category, Rarity, Foil Type, Language, Condition Type (+ Sub-
+  Condition/Grading Co./Cert Number for Slabs), Purchase Price/Date (for
+  non-Wanted cards), and current binder placement if any. `.modal-sheet`
+  gained `max-height: 85vh; overflow-y: auto` since this made the sheet
+  meaningfully taller — applies to every modal, not just this one, but
+  none of the others were close to needing it before. Tapping a row that's
+  currently swiped open (§22) closes the swipe instead of opening the
+  detail sheet, matching how swipe-action lists are generally expected
+  to behave.

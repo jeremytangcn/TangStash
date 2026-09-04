@@ -16,13 +16,17 @@
 // persists whatever record shape it's given. Call scrape-card.js /
 // store-card-image.js first if a record needs fresh price/image data.
 
-const { getStore } = require("@netlify/blobs");
+const { connectLambda, getStore } = require("@netlify/blobs");
 const { generateListingUid, computeListingStatus } = require("./lib/inventory-helpers");
 
 const STORE_NAME = "tangstash-data";
 const INDEX_KEY = "inventory-index";
 
 exports.handler = async (event) => {
+  // Required for Netlify Blobs in classic ("Lambda compatibility mode")
+  // functions — see binders-list.js for the full explanation.
+  connectLambda(event);
+
   if (event.httpMethod !== "POST") {
     return respond(405, { error: "Use POST" });
   }

@@ -15,12 +15,16 @@
 // just left stale). Good enough for a single-user personal app; revisit
 // if that ever becomes confusing in practice.
 
-const { getStore } = require("@netlify/blobs");
+const { connectLambda, getStore } = require("@netlify/blobs");
 
 const STORE_NAME = "tangstash-data";
 const BINDERS_KEY = "binders-index";
 
 exports.handler = async (event) => {
+  // Required for Netlify Blobs in classic ("Lambda compatibility mode")
+  // functions — see binders-list.js for the full explanation.
+  connectLambda(event);
+
   if (event.httpMethod !== "POST") {
     return respond(405, { error: "Use POST" });
   }

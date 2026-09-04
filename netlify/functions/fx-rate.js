@@ -10,7 +10,7 @@
 //
 // Usage: GET /.netlify/functions/fx-rate
 
-const { getStore } = require("@netlify/blobs");
+const { connectLambda, getStore } = require("@netlify/blobs");
 
 const STORE_NAME = "tangstash-data";
 const CACHE_KEY = "fx-rate-cache";
@@ -18,7 +18,14 @@ const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const TARGET_CURRENCIES = ["JPY", "AUD", "CNY", "MYR", "USD"]; // RMB = CNY
 const BASE_CURRENCY = "SGD";
 
-exports.handler = async () => {
+exports.handler = async (event) => {
+  // Required for Netlify Blobs in classic ("Lambda compatibility mode")
+  // functions — see binders-list.js for the full explanation. This
+  // function previously took no `event` param at all since it didn't
+  // need one otherwise; it's added here purely to have something to
+  // pass to connectLambda().
+  connectLambda(event);
+
   const store = getStore(STORE_NAME);
 
   try {

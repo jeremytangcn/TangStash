@@ -10,14 +10,27 @@
 //
 // Returns the raw image bytes with the content-type that was recorded
 // when the image was stored (see store-card-image.js), plus a long cache
-// lifetime since a given blobKey's bytes never change after being written
-// (a re-scrape writes a new key, it doesn't mutate an old one).
+// lifetime since a given blobKey's bytes never change after being
+// written. This depends on every caller generating a genuinely unique
+// key per store call (see app.js::uniqueImageId()) rather than a
+// deterministic one — a refresh/re-upload always gets a brand new key,
+// never overwrites an existing one in place. (This was violated once,
+// briefly, by an early version of the price-refresh feature that reused
+// a deterministic key so refreshes would overwrite in place — that
+// silently broke any image that had ever been requested before, since
+// the browser/CDN had already cached it as "immutable, 1 year" under
+// that key. Fixed by making keys unique instead of changing this
+// aggressive caching, since the caching itself is the right call.)
 
-const { getStore } = require("@netlify/blobs");
+const { connectLambda, getStore } = require("@netlify/blobs");
 
 const STORE_NAME = "card-images";
 
 exports.handler = async (event) => {
+  // Required for Netlify Blobs in classic ("Lambda compatibility mode")
+  // functions — see binders-list.js for the full explanation.
+  connectLambda(event);
+
   if (event.httpMethod !== "GET") {
     return respond(405, "Use GET");
   }

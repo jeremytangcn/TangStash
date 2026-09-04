@@ -16,6 +16,7 @@
     --gold-soft: #E8C77E;
     --teal: #35D0C4;
     --coral: #E8694F;
+    --mint: #4ADE80;
     --text: #ECEEF3;
     --text-dim: #8A93A6;
     --text-faint: #545E75;
@@ -23,39 +24,56 @@
     --body: 'Inter', sans-serif;
     --mono: 'JetBrains Mono', monospace;
   }
+  /* Light mode — same accent colors (gold/teal/coral), inverted ink/text
+     scale. Applied by toggling data-theme="light" on <html> (see
+     applyTheme() in app.js); default (no attribute, or data-theme="dark")
+     is the original dark palette above. */
+  html[data-theme="light"]{
+    --ink: #F5F3EE;
+    --ink-2: #FFFFFF;
+    --ink-3: #ECE8DF;
+    --line: #DCD6C8;
+    --text: #1C1A15;
+    --text-dim: #5C5748;
+    --text-faint: #938D7A;
+  }
   *{box-sizing:border-box; margin:0; padding:0;}
+  html, body{ height:100%; }
   body{
-    background: #04060a;
+    background: var(--ink);
     font-family: var(--body);
     color: var(--text);
-    display:flex;
-    justify-content:center;
-    padding: 40px 16px;
     min-height:100vh;
+    /* Every bottom-sheet modal (.modal-sheet) spans the full width of its
+       backdrop and has a soft box-shadow with a 50px blur and no spread
+       (see .modal-sheet below). On any viewport <=480px (i.e. basically
+       every phone), the sheet is already flush with the screen edges, so
+       that shadow's blur bleeds ~50px past the left AND right edges of
+       the actual viewport. Some browsers count that bleed as scrollable
+       overflow, producing a phantom horizontal (and slight vertical)
+       scrollbar with nothing actually there to scroll to — reported as
+       "the info container isn't aligned" when opening a card's detail
+       sheet, but it happens for every modal in the app, not just that
+       one. overflow-x:hidden on body is the standard fix: it clips the
+       decorative shadow bleed at the true document edge without
+       affecting any real layout, since nothing the user needs to see
+       ever lived out there in the first place. */
+    overflow-x: hidden;
   }
-  .device{
-    width: 390px;
-    max-width:100%;
+  /* App shell: a normal responsive page, not a fake phone bezel. Full
+     width on mobile; capped + centered on wider screens so it still
+     reads as a comfortable single column rather than stretching edge
+     to edge on a desktop browser. */
+  .app-shell{
+    max-width: 480px;
+    margin: 0 auto;
+    min-height: 100vh;
     background: var(--ink);
-    border-radius: 40px;
-    border: 10px solid #000;
-    box-shadow: 0 40px 80px -20px rgba(0,0,0,0.7), 0 0 0 1px #1a1a1a;
-    overflow:hidden;
-    position:relative;
-  }
-  .statusbar{
-    display:flex; justify-content:space-between; align-items:center;
-    padding: 14px 24px 6px;
-    font-size:13px; font-weight:600; color:var(--text);
-    font-family: var(--mono);
+    position: relative;
   }
   .screen{
-    height: 760px;
-    overflow-y:auto;
-    padding-bottom: 90px;
-    scrollbar-width:none;
+    padding-bottom: 96px; /* clears the fixed bottom nav */
   }
-  .screen::-webkit-scrollbar{display:none;}
   .screen{display:none;}
   .screen.active{display:block;}
 
@@ -81,7 +99,25 @@
     background: var(--ink-3); border:1px solid var(--line);
     display:flex; align-items:center; justify-content:center;
     color: var(--text-dim);
+    cursor: pointer;
   }
+  .icon-btn.spinning{ animation: spin 1s linear infinite; color: var(--teal); }
+  @keyframes spin{ from{ transform:rotate(0deg); } to{ transform:rotate(360deg); } }
+
+  .chip-row{ display:flex; flex-wrap:wrap; gap:6px; }
+  .chip-toggle{
+    font-family: var(--body); font-size:12px; padding:6px 12px; border-radius:20px;
+    background: var(--ink-3); border:1px solid var(--line); color: var(--text-dim);
+    cursor:pointer; user-select:none;
+  }
+  .chip-toggle.active{ background: var(--gold); color:#1a1300; border-color: var(--gold); font-weight:600; }
+  .chip-tag{
+    font-family: var(--body); font-size:12px; padding:6px 8px 6px 12px; border-radius:20px;
+    background: var(--ink-3); border:1px solid var(--line); color: var(--text);
+    display:flex; align-items:center; gap:6px;
+  }
+  .chip-tag .chip-remove{ cursor:pointer; color: var(--text-faint); font-weight:700; padding:0 2px; }
+  .chip-tag .chip-remove:hover{ color: var(--coral); }
 
   /* ---- dashboard ---- */
   .section-label{
@@ -111,28 +147,44 @@
     font-family: var(--disp); font-weight:800; font-size:34px;
     letter-spacing:-0.02em; margin-top:4px;
   }
-  .hero-sub{
-    display:flex; gap:14px; margin-top:14px;
+  .hero-sub-text{ font-size:12px; color:var(--text-dim); margin-top:12px; font-family:var(--mono); }
+
+  /* 1x2 grid: purchase value split by whether market data exists to
+     compare against. Card counts always sum to the total Purchased
+     count (see renderDashboard) — the % each card shows is that split,
+     not a profit percentage. */
+  .metric-grid{
+    display:grid; grid-template-columns: 1fr 1fr; gap:10px;
+    padding: 0 22px; margin-top:14px;
   }
-  .hero-chip{
-    font-family: var(--mono); font-size:12px;
-    background: rgba(53,208,196,0.1); color: var(--teal);
-    border:1px solid rgba(53,208,196,0.25);
-    padding:4px 10px; border-radius:8px;
-    font-weight:600;
+  .metric-card{
+    background: var(--ink-2); border:1px solid var(--line); border-radius:16px;
+    padding:14px;
+    display:flex; flex-direction:column;
   }
-  .hero-chip.down{ background: rgba(232,105,79,0.1); color: var(--coral); border-color: rgba(232,105,79,0.25);}
+  .metric-card-label{
+    font-family:var(--mono); font-size:10px; text-transform:uppercase;
+    letter-spacing:0.05em; color:var(--text-faint); margin-bottom:10px;
+  }
+  .metric-card-row{
+    display:flex; justify-content:space-between; align-items:baseline;
+    font-size:11.5px; color:var(--text-dim); margin-bottom:5px; gap:6px;
+  }
+  .metric-card-row span:last-child{ color:var(--text); font-weight:700; font-family:var(--mono); white-space:nowrap; }
+  .metric-card-pl{ font-family:var(--disp); font-weight:800; font-size:17px; margin-top:8px; color:var(--teal); }
+  .metric-card-pl.down{ color:var(--coral); }
+  .metric-card-count{ font-size:10.5px; color:var(--text-faint); margin-top:auto; padding-top:10px; font-family:var(--mono); }
 
   .stat-grid{
-    display:grid; grid-template-columns: 1fr 1fr; gap:10px;
+    display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px;
     padding: 0 22px; margin-top:14px;
   }
   .stat-card{
     background: var(--ink-2); border:1px solid var(--line); border-radius:16px;
-    padding:14px;
+    padding:12px 10px;
   }
-  .stat-num{ font-family: var(--disp); font-weight:700; font-size:22px; }
-  .stat-name{ font-size:11.5px; color:var(--text-dim); margin-top:2px; }
+  .stat-num{ font-family: var(--disp); font-weight:700; font-size:19px; }
+  .stat-name{ font-size:10px; color:var(--text-dim); margin-top:2px; }
 
   .row-card{
     margin: 0 22px 10px;
@@ -182,8 +234,17 @@
   .filter-pill.active-filter{
     border-color: var(--gold); color: var(--gold); font-weight:700;
   }
+  /* position:fixed, not absolute — .filter-row needs overflow-x:auto for
+     its horizontal scroll, and per the CSS overflow spec, leaving the
+     other axis at 'visible' (explicitly or by default) doesn't actually
+     stay visible once one axis is a scroll value: the UA computes it as
+     'auto' too, so the dropdown was being clipped by its own scrolling
+     row no matter what overflow-y said. Fixed positioning escapes that
+     ancestor entirely (nothing here sets transform/filter/etc. on an
+     ancestor to create a containing block for fixed elements), so
+     top/left are set in JS instead of CSS — see toggleFilterMenu(). */
   .filter-dropdown{
-    display:none; position:absolute; top:36px; left:0; z-index:30;
+    display:none; position:fixed; z-index:30;
     background: var(--ink-3); border:1px solid var(--line); border-radius:12px;
     padding:6px; min-width:150px; max-height:220px; overflow-y:auto;
     box-shadow: 0 12px 30px rgba(0,0,0,0.45);
@@ -201,9 +262,22 @@
   }
 
   .inv-item{
-    margin:0 22px 10px;
-    background: var(--ink-2); border:1px solid var(--line); border-radius:16px;
+    margin:0; background: var(--ink-2); border:1px solid var(--line); border-radius:16px;
     padding:12px; display:flex; gap:12px; align-items:center;
+  }
+  .swipe-row{
+    position:relative; margin:0 22px 10px; border-radius:16px; overflow:hidden;
+  }
+  .swipe-action{
+    position:absolute; top:0; bottom:0; width:84px;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px;
+    font-family:var(--body); font-size:11px; font-weight:700; color:#fff; cursor:pointer;
+  }
+  .swipe-action-icon{ font-size:18px; }
+  .swipe-action-left{ left:0; background: var(--teal); }
+  .swipe-action-right{ right:0; background: var(--coral); }
+  .swipe-content{
+    position:relative; z-index:2; touch-action: pan-y;
   }
   .inv-thumb{
     width:46px; height:64px; border-radius:6px; flex-shrink:0;
@@ -232,6 +306,26 @@
   .inv-price{ font-family:var(--mono); font-weight:700; font-size:13.5px; }
   .inv-pl{ font-family:var(--mono); font-size:10.5px; color:var(--teal); margin-top:2px; }
   .inv-pl.down{ color:var(--coral); }
+
+  /* ---- inventory: grouped listings (same Card Number, 2+ copies) ---- */
+  .inv-group-header{ cursor:pointer; border-color: rgba(212,164,76,0.3); }
+  .inv-group-count-badge{
+    position:absolute; bottom:-6px; left:50%; transform:translateX(-50%);
+    font-family:var(--mono); font-size:8px; font-weight:700;
+    background: var(--teal); color:#04201d;
+    padding:1px 5px; border-radius:4px; white-space:nowrap;
+  }
+  .inv-group-chevron{
+    font-size:11px; color:var(--text-faint); margin-top:4px;
+    transition: transform 0.2s ease;
+  }
+  .inv-group-chevron.open{ transform: rotate(180deg); }
+  /* Indented under the group header rather than flush with the screen
+     edge, so expanded members read as belonging to the group above them
+     — .swipe-row's own side margins are overridden per-row (see
+     renderInventoryRow's `nested` param) since this padding already
+     provides the horizontal position. */
+  .inv-group-members{ padding: 10px 0 2px 26px; border-left: 2px solid var(--line); margin-left: 10px; }
 
   /* ---- binder ---- */
   .binder-switcher{
@@ -304,7 +398,7 @@
   .bulk-btn.delivered{ background: var(--gold); color:#1a1300; }
 
   .toast{
-    position:absolute; bottom:100px; left:50%; transform: translateX(-50%) translateY(10px);
+    position:fixed; bottom:100px; left:50%; transform: translateX(-50%) translateY(10px);
     background: var(--ink-3); border:1px solid var(--line); border-radius:12px;
     padding:11px 16px; font-size:12px; color:var(--text); max-width:300px; text-align:center;
     box-shadow: 0 10px 30px rgba(0,0,0,0.45);
@@ -347,19 +441,75 @@
   .slot.filled{
     background: linear-gradient(150deg, #262c3d 0%, #171b26 60%, #0e1119 100%);
     border-color: rgba(212,164,76,0.3);
+    cursor: grab;
+    touch-action: none; /* lets pointermove drive the drag instead of the page scrolling */
+    user-select: none;
+  }
+  .slot.filled.dragging{
+    cursor: grabbing;
+    box-shadow: 0 14px 28px rgba(0,0,0,0.5);
+    z-index: 25;
+    transition: none;
+  }
+  .slot.filled.drag-armed{
+    box-shadow: 0 0 0 2px var(--gold);
+    transform: scale(1.03);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  .slot.drop-target{
+    outline: 2px dashed var(--teal);
+    outline-offset: -2px;
+  }
+  .slot.empty{ cursor:pointer; }
+  .slot.selected{
+    outline: 2px solid var(--teal);
+    outline-offset: -2px;
+    background: linear-gradient(150deg, rgba(53,208,196,0.22) 0%, #171b26 60%, #0e1119 100%);
+  }
+  .slot-check-badge{
+    position:absolute; top:6px; right:6px; width:20px; height:20px; border-radius:50%; z-index:2;
+    background: var(--teal); color:#04201d; font-size:12px; font-weight:800;
+    display:flex; align-items:center; justify-content:center;
   }
   .slot.filled::before{
     content:''; position:absolute; inset:5px;
     border:1px solid rgba(212,164,76,0.25); border-radius:5px;
+    z-index:1;
+  }
+  .slot.filled::after{
+    /* Scrim so the number/rarity/price overlay text stays legible once a
+       slot has a card-photo background (added when image display was
+       added to binder slots — plain text with no backing was unreadable
+       against a busy photo). */
+    content:''; position:absolute; inset:0;
+    background: linear-gradient(to top, rgba(0,0,0,0.65) 0%, rgba(0,0,0,0.05) 45%, transparent 60%),
+                linear-gradient(to bottom, rgba(0,0,0,0.45) 0%, transparent 30%);
+    pointer-events:none;
   }
   .slot-num{
-    position:absolute; top:3px; left:5px;
+    position:absolute; top:3px; left:5px; z-index:2;
     font-family:var(--mono); font-size:8px; color: var(--text-faint);
+    text-shadow: 0 1px 2px rgba(0,0,0,0.8);
   }
   .slot.empty .slot-num{ color: #2a3040; }
   .slot-icon{ color: rgba(236,238,243,0.15); font-size:18px; }
+  /* Dims a manually-placed card's image when it's quantity=0 (Wanted /
+     Pending Delivery, placed ahead of actually owning it) — see
+     manualSlotHtml()'s comment. z-index:1 sits above the background
+     image but below .slot-num/.slot-footer (z-index:2), so the slot
+     number and price labels stay legible on top of the shade. */
+  .slot-shade{
+    position:absolute; inset:0; z-index:1;
+    background: rgba(10,14,23,0.72);
+    display:flex; align-items:center; justify-content:center;
+    padding:6px; text-align:center;
+  }
+  .slot-shade-label{
+    font-family:var(--mono); font-size:7px; font-weight:700; letter-spacing:0.04em;
+    text-transform:uppercase; color: var(--text-dim);
+  }
   .slot-footer{
-    position:absolute; bottom:3px; left:4px; right:4px;
+    position:absolute; bottom:3px; left:4px; right:4px; z-index:2;
     display:flex; align-items:flex-end; justify-content:space-between; gap:3px;
   }
   .slot-rarity-tag{
@@ -370,8 +520,14 @@
   .slot-prices{
     display:flex; flex-direction:column; align-items:flex-end; line-height:1.2;
   }
-  .slot-price-purchase{ font-family:var(--mono); font-size:6px; color:var(--text-faint); }
-  .slot-price-market{ font-family:var(--mono); font-size:7.5px; font-weight:700; color:var(--gold-soft); }
+  /* Binder tile price labels — Market is now the emphasized one
+     (gold, bold, larger); Purchase sits above it but smaller/quieter
+     (mint, normal weight). At 12px/8px these are noticeably bigger than
+     the old 6-7.5px labels — worth confirming on device that they still
+     fit the tile's slot-footer without crowding the rarity tag next to
+     them (see .slot-footer). */
+  .slot-price-purchase{ font-family:var(--mono); font-size:8px; font-weight:400; color:var(--mint); }
+  .slot-price-market{ font-family:var(--mono); font-size:12px; font-weight:700; color:var(--gold-soft); }
 
   .binder-page{ position:relative; touch-action: pan-y; user-select:none; }
   .swipe-hint{
@@ -382,18 +538,21 @@
 
   /* ---- bottom nav ---- */
   .bottom-nav{
-    position:absolute; bottom:0; left:0; right:0;
+    position:fixed; bottom:0; left:50%; transform:translateX(-50%);
+    width:100%; max-width:480px;
     height:82px;
     background: rgba(16,21,31,0.92);
     backdrop-filter: blur(12px);
     border-top: 1px solid var(--line);
     display:flex; align-items:flex-start; justify-content:space-around;
     padding-top:12px;
+    z-index: 40;
   }
   .nav-item{
     display:flex; flex-direction:column; align-items:center; gap:5px;
     color: var(--text-faint);
     font-size:10.5px; font-family:var(--body); font-weight:600;
+    cursor:pointer;
   }
   .nav-item.active{ color: var(--gold); }
   .nav-icon{ width:22px; height:22px; }
@@ -406,23 +565,6 @@
   }
   .nav-item.center .nav-icon-wrap svg{ color:#1a1300; }
   .nav-item.center{ color: var(--text-dim); }
-
-  /* ---- demo controls (outside device) ---- */
-  .controls{
-    display:flex; gap:8px; justify-content:center; margin-top:20px;
-  }
-  .ctrl-btn{
-    font-family: var(--body); font-size:13px; font-weight:600;
-    padding:9px 16px; border-radius:10px;
-    background: var(--ink-2); border:1px solid var(--line);
-    color: var(--text-dim); cursor:pointer;
-    transition: all 0.15s ease;
-  }
-  .ctrl-btn.active{ background: var(--gold); color:#1a1300; border-color:var(--gold); }
-  .wrap{ display:flex; flex-direction:column; align-items:center; }
-  .caption{
-    font-family: var(--mono); font-size:11px; color:#4a5268; margin-top:14px; text-align:center; max-width:390px;
-  }
 
   /* ---- add card / scrape ---- */
   .field-group{ padding: 4px 22px 0; }
@@ -498,15 +640,65 @@
   }
   .price-line{ display:flex; align-items:center; justify-content:flex-end; gap:0; }
   .modal-backdrop{
-    position:absolute; inset:0; background: rgba(4,6,10,0.72);
+    position:fixed; top:0; bottom:0; left:50%; transform:translateX(-50%);
+    width:100%; max-width:480px;
+    background: rgba(4,6,10,0.72);
     backdrop-filter: blur(3px);
     display:none; align-items:flex-end; justify-content:center; z-index:50;
   }
   .modal-backdrop.open{ display:flex; }
+  /* Full-screen zoomable photo viewer — see the HTML comment above its
+     markup for why it's not built on .modal-backdrop/.modal-sheet.
+     z-index above every other modal (50) since it opens from within
+     the price-modal, on top of it. touch-action:none on the image is
+     load-bearing: it stops the browser's own native pinch-to-zoom/pan
+     gestures from fighting the pointer-event-based zoom in app.js. */
+  .image-viewer-backdrop{
+    position:fixed; inset:0; z-index:60;
+    background: rgba(4,6,10,0.94);
+    display:none; align-items:center; justify-content:center;
+    overflow:hidden;
+  }
+  .image-viewer-backdrop.open{ display:flex; }
+  .image-viewer-backdrop img{
+    max-width:92vw; max-height:88vh;
+    touch-action:none; user-select:none; -webkit-user-select:none;
+    will-change:transform;
+  }
+  .image-viewer-hint{
+    position:absolute; bottom:22px; left:0; right:0; text-align:center;
+    font-family:var(--mono); font-size:10.5px; color:var(--text-faint);
+    letter-spacing:0.04em; pointer-events:none; transition:opacity 0.3s;
+  }
   .modal-sheet{
     width:100%; background: var(--ink-2); border:1px solid var(--line);
     border-radius: 22px 22px 0 0; padding: 18px 20px 26px;
     box-shadow: 0 -20px 50px rgba(0,0,0,0.5);
+    max-height: 85vh; overflow-y: auto;
+  }
+  .pm-status-badge{
+    display:inline-block; margin-top:8px; font-family:var(--mono); font-size:10.5px; font-weight:700;
+    padding:3px 10px; border-radius:20px; letter-spacing:0.03em;
+    background: rgba(212,164,76,0.12); color: var(--gold); border:1px solid rgba(212,164,76,0.3);
+  }
+  .pm-status-badge.pending{ background: rgba(53,208,196,0.12); color: var(--teal); border-color: rgba(53,208,196,0.3); }
+  .pm-status-badge.wanted{ background: rgba(232,105,79,0.12); color: var(--coral); border-color: rgba(232,105,79,0.3); }
+  .pm-details-grid{
+    display:grid; grid-template-columns: 1fr 1fr; gap:10px 14px;
+    margin-top:14px; padding:14px; background: var(--ink-3); border:1px solid var(--line); border-radius:14px;
+  }
+  .pm-detail-item{ min-width:0; }
+  .pm-detail-label{
+    font-family:var(--mono); font-size:9.5px; letter-spacing:0.06em; text-transform:uppercase;
+    color: var(--text-faint); margin-bottom:2px;
+  }
+  .pm-detail-value{ font-size:12.5px; color: var(--text); word-break:break-word; }
+  .pm-detail-item.span-2{ grid-column: 1 / -1; }
+  .pm-pill-row{ display:flex; flex-wrap:wrap; gap:5px; }
+  .pm-pill{
+    display:inline-block; font-family:var(--body); font-size:11px; font-weight:600;
+    padding:3px 10px; border-radius:20px;
+    background: rgba(212,164,76,0.12); color: var(--gold); border:1px solid rgba(212,164,76,0.3);
   }
   .modal-handle{
     width:36px; height:4px; border-radius:100px; background: var(--line);
@@ -544,59 +736,91 @@
   }
   .pm-average-label{ font-family:var(--mono); font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em;}
   .pm-average-value{ font-family:var(--disp); font-weight:800; font-size:20px; color:var(--gold-soft); }
+  /* Purchase price sits above Market price (see showPriceBreakdownFor) —
+     bigger and in a brighter, more saturated mint (was teal at the same
+     size as market price, which read as too easy to miss against the
+     dark background). Row background/border pick up the same tint so
+     the emphasis doesn't rely on text color alone. */
+  .pm-average-row.purchase{
+    background: rgba(74,222,128,0.08); border-color: rgba(74,222,128,0.3);
+  }
+  .pm-average-row.purchase .pm-average-value{ color: var(--mint); font-size:26px; }
   .modal-footnote{
     font-size:11px; color:var(--text-faint); margin-top:14px; line-height:1.5;
   }
 </style>
+<script>
+  // Applied before first paint (inline, in <head>) to avoid a flash of the
+  // wrong theme on load. The real toggle logic lives in app.js::setTheme().
+  (function () {
+    try {
+      if (localStorage.getItem("tangstash-theme") === "light") {
+        document.documentElement.setAttribute("data-theme", "light");
+      }
+    } catch (e) { /* localStorage unavailable — just fall back to dark */ }
+  })();
+</script>
 </head>
 <body>
-<div class="wrap">
-<div class="device">
+<div class="app-shell">
 
   <!-- DASHBOARD -->
   <div class="screen active" id="screen-dashboard">
-    <div class="statusbar"><span>9:41</span><span>●●●●  📶  🔋</span></div>
     <div class="app-header">
       <div class="wordmark"><span class="dot"></span>TangStash</div>
-      <div class="icon-btn">⚙</div>
+      <div class="icon-btn" onclick="openSettingsModal()" title="Settings">⚙</div>
     </div>
 
     <div class="hero-card">
-      <div class="hero-label">Total Collection Value</div>
-      <div class="hero-value" id="dash-hero-value">S$0</div>
-      <div class="hero-sub">
-        <span class="hero-chip" id="dash-hero-profit">—</span>
+      <div class="hero-label">Total Purchase Value</div>
+      <div class="hero-value" id="dash-hero-value">S$0.00</div>
+      <div class="hero-sub-text" id="dash-hero-pending">Pending Delivery: S$0.00</div>
+    </div>
+
+    <div class="metric-grid">
+      <div class="metric-card">
+        <div class="metric-card-label">With Market Value</div>
+        <div class="metric-card-row"><span>Purchase</span><span id="dash-mv-purchase">S$0.00</span></div>
+        <div class="metric-card-row"><span>Market</span><span id="dash-mv-market">S$0.00</span></div>
+        <div class="metric-card-pl" id="dash-mv-pl">+ S$0.00</div>
+        <div class="metric-card-count" id="dash-mv-count">0 cards (0%)</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-card-label">Without Market Value</div>
+        <div class="metric-card-row"><span>Purchase</span><span id="dash-nomv-purchase">S$0.00</span></div>
+        <div class="metric-card-count" id="dash-nomv-count">0 cards (0%)</div>
       </div>
     </div>
 
     <div class="stat-grid">
-      <div class="stat-card"><div class="stat-num" id="dash-stat-total">0</div><div class="stat-name">Total cards</div></div>
-      <div class="stat-card"><div class="stat-num" id="dash-stat-unique">0</div><div class="stat-name">Unique cards</div></div>
-      <div class="stat-card"><div class="stat-num" id="dash-stat-slabs">0</div><div class="stat-name">Slabs graded</div></div>
-      <div class="stat-card"><div class="stat-num" id="dash-stat-pending">0</div><div class="stat-name">Pending delivery</div></div>
+      <div class="stat-card" style="cursor:pointer;" onclick="goToInventoryFiltered({listing:'Purchased'})"><div class="stat-num" id="dash-stat-total">0</div><div class="stat-name">Total cards</div></div>
+      <div class="stat-card" style="cursor:pointer;" onclick="goToInventoryFiltered({listing:'Purchased'})"><div class="stat-num" id="dash-stat-unique">0</div><div class="stat-name">Unique cards</div></div>
+      <div class="stat-card" style="cursor:pointer;" onclick="goToInventoryFiltered({listing:'Purchased', conditionType:'Slabs'})"><div class="stat-num" id="dash-stat-slabs">0</div><div class="stat-name">Slabs graded</div></div>
+      <div class="stat-card" style="cursor:pointer;" onclick="goToInventoryFiltered({listing:'Purchased', language:'Japanese'})"><div class="stat-num" id="dash-stat-japanese">0</div><div class="stat-name">Japanese cards</div></div>
+      <div class="stat-card" style="cursor:pointer;" onclick="goToInventoryFiltered({listing:'Purchased', language:'English'})"><div class="stat-num" id="dash-stat-english">0</div><div class="stat-name">English cards</div></div>
+      <div class="stat-card" style="cursor:pointer;" onclick="goToInventoryFiltered({listing:'Pending Delivery'})"><div class="stat-num" id="dash-stat-pending">0</div><div class="stat-name">Pending delivery</div></div>
     </div>
-
-    <div class="section-label">Top by value</div>
-    <div id="dash-top-value"><div class="inv-loading" style="margin:0 22px 14px;">Loading…</div></div>
 
     <div class="section-label">Recently added</div>
     <div id="dash-recent"><div class="inv-loading" style="margin:0 22px 14px;">Loading…</div></div>
 
-    <div class="bottom-nav">
-      <div class="nav-item active"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-8 9 8M5 10v10h14V10"/></svg>Home</div>
-      <div class="nav-item" onclick="showScreen('inventory')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>Search</div>
-      <div class="nav-item center" onclick="showScreen('add')"><div class="nav-icon-wrap"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg></div>Add</div>
-      <div class="nav-item" onclick="showScreen('binder')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16M3 10h18"/></svg>Binder</div>
+        <div class="bottom-nav">
+      <div class="nav-item" data-screen="dashboard" onclick="showScreen('dashboard')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-8 9 8M5 10v10h14V10"/></svg>Home</div>
+      <div class="nav-item" data-screen="inventory" onclick="showScreen('inventory')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>Inventory</div>
+      <div class="nav-item center" data-screen="add" onclick="showScreen('add')"><div class="nav-icon-wrap"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg></div>Add</div>
+      <div class="nav-item" data-screen="binder" onclick="showScreen('binder')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16M3 10h18"/></svg>Binder</div>
       <div class="nav-item"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21a8 8 0 00-16 0"/><circle cx="12" cy="7" r="4"/></svg>Me</div>
     </div>
   </div>
 
   <!-- INVENTORY -->
   <div class="screen" id="screen-inventory">
-    <div class="statusbar"><span>9:41</span><span>●●●●  📶  🔋</span></div>
     <div class="app-header">
       <div class="wordmark" style="font-size:18px;">Inventory</div>
-      <div class="icon-btn" onclick="triggerImport()" title="Import from xlsx">⇅</div>
+      <div style="display:flex; gap:8px;">
+        <div class="icon-btn" id="refresh-all-btn" onclick="refreshAllPrices()" title="Refresh price &amp; image for every card with a saved source URL">↻</div>
+        <div class="icon-btn" onclick="triggerImport()" title="Import from xlsx">⇅</div>
+      </div>
       <input type="file" id="import-file-input" accept=".xlsx" style="display:none;" onchange="handleImportFile(this)">
     </div>
     <div id="import-status" style="margin: 0 22px 8px; font-family:var(--mono); font-size:10.5px; color:var(--teal);"></div>
@@ -604,7 +828,7 @@
       🔍 &nbsp;<input id="inv-search-input" oninput="onInventorySearch(this.value)" placeholder="Search by name or number…" style="background:none; border:none; outline:none; color:var(--text); font-family:var(--body); font-size:13.5px; flex:1;">
     </div>
     <div style="margin: -8px 22px 12px; font-family:var(--mono); font-size:10px; color:var(--text-faint);">
-      Need the import template? <a href="tangstash-import-template.xlsx" download style="color:var(--teal);">Download it here</a>.
+      Need the update/import template? <a href="tangstash-import-template.xlsx" download style="color:var(--teal);">Download it here</a> or <a href="#" onclick="event.preventDefault(); exportInventoryTemplate();" style="color:var(--teal);">Export it here</a>.
     </div>
 
     <div class="filter-row" id="filter-row">
@@ -658,6 +882,16 @@
           <div class="filter-option" onclick="selectFilter('rarity','SR', this)">SR</div>
           <div class="filter-option" onclick="selectFilter('rarity','SEC', this)">SEC</div>
           <div class="filter-option" onclick="selectFilter('rarity','L', this)">L</div>
+          <div class="filter-option" onclick="selectFilter('rarity','Don!!', this)">Don!!</div>
+        </div>
+      </div>
+      <div class="filter-item">
+        <div class="filter-pill" id="fp-conditionType" onclick="toggleFilterMenu('conditionType')">Condition: All</div>
+        <div class="filter-dropdown" id="fd-conditionType">
+          <div class="filter-option selected" onclick="selectFilter('conditionType','All', this)">All</div>
+          <div class="filter-option" onclick="selectFilter('conditionType','Singles', this)">Singles</div>
+          <div class="filter-option" onclick="selectFilter('conditionType','Slabs', this)">Slabs</div>
+          <div class="filter-option" onclick="selectFilter('conditionType','Sealed', this)">Sealed</div>
         </div>
       </div>
     </div>
@@ -666,31 +900,17 @@
       <div class="inv-loading">Loading inventory…</div>
     </div>
 
-    <div class="bottom-nav">
-      <div class="nav-item" onclick="showScreen('dashboard')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-8 9 8M5 10v10h14V10"/></svg>Home</div>
-      <div class="nav-item active"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>Search</div>
-      <div class="nav-item center" onclick="showScreen('add')"><div class="nav-icon-wrap"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg></div>Add</div>
-      <div class="nav-item" onclick="showScreen('binder')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16M3 10h18"/></svg>Binder</div>
+        <div class="bottom-nav">
+      <div class="nav-item" data-screen="dashboard" onclick="showScreen('dashboard')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-8 9 8M5 10v10h14V10"/></svg>Home</div>
+      <div class="nav-item" data-screen="inventory" onclick="showScreen('inventory')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>Inventory</div>
+      <div class="nav-item center" data-screen="add" onclick="showScreen('add')"><div class="nav-icon-wrap"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg></div>Add</div>
+      <div class="nav-item" data-screen="binder" onclick="showScreen('binder')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16M3 10h18"/></svg>Binder</div>
       <div class="nav-item"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21a8 8 0 00-16 0"/><circle cx="12" cy="7" r="4"/></svg>Me</div>
-    </div>
-
-    <div class="modal-backdrop" id="price-modal" onclick="if(event.target===this) closePriceBreakdown()">
-      <div class="modal-sheet">
-        <div class="modal-handle"></div>
-        <div class="modal-title-row">
-          <div class="modal-title" id="pm-title">Card name</div>
-          <div class="modal-close" onclick="closePriceBreakdown()">✕</div>
-        </div>
-        <div class="modal-sub" id="pm-sub">OP00-000</div>
-        <div id="pm-rows"></div>
-        <div class="modal-footnote">Market price = average of Toretoku + Yuyu-tei. PriceCharting (coral) is a last resort, used only when neither has data — for Slabs, PriceCharting PSA10 is used instead. Muted prices are from listings currently out of stock or not used in the calculation.</div>
-      </div>
     </div>
   </div>
 
   <!-- BINDER -->
   <div class="screen" id="screen-binder">
-    <div class="statusbar"><span>9:41</span><span>●●●●  📶  🔋</span></div>
     <div class="app-header">
       <div class="wordmark" style="font-size:18px;">Binder</div>
       <div class="icon-btn">⋮</div>
@@ -755,63 +975,17 @@
 
     <div class="toast" id="binder-toast"></div>
 
-    <div class="bottom-nav">
-      <div class="nav-item" onclick="showScreen('dashboard')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-8 9 8M5 10v10h14V10"/></svg>Home</div>
-      <div class="nav-item" onclick="showScreen('inventory')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>Search</div>
-      <div class="nav-item center" onclick="showScreen('add')"><div class="nav-icon-wrap"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg></div>Add</div>
-      <div class="nav-item active"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16M3 10h18"/></svg>Binder</div>
+        <div class="bottom-nav">
+      <div class="nav-item" data-screen="dashboard" onclick="showScreen('dashboard')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-8 9 8M5 10v10h14V10"/></svg>Home</div>
+      <div class="nav-item" data-screen="inventory" onclick="showScreen('inventory')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>Inventory</div>
+      <div class="nav-item center" data-screen="add" onclick="showScreen('add')"><div class="nav-icon-wrap"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg></div>Add</div>
+      <div class="nav-item" data-screen="binder" onclick="showScreen('binder')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16M3 10h18"/></svg>Binder</div>
       <div class="nav-item"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21a8 8 0 00-16 0"/><circle cx="12" cy="7" r="4"/></svg>Me</div>
-    </div>
-
-    <div class="modal-backdrop" id="new-binder-modal" onclick="if(event.target===this) closeNewBinderModal()">
-      <div class="modal-sheet">
-        <div class="modal-handle"></div>
-        <div class="modal-title-row">
-          <div class="modal-title">New binder</div>
-          <div class="modal-close" onclick="closeNewBinderModal()">✕</div>
-        </div>
-        <div class="modal-sub">Manually arranged, like Main Collection</div>
-        <input class="form-input" id="new-binder-name" placeholder="e.g. For Trade, OP-09 Set" style="margin-top:4px;">
-        <button class="save-btn" style="margin:16px 0 4px; width:100%;" onclick="createBinder()">Create binder</button>
-      </div>
-    </div>
-
-    <div class="modal-backdrop" id="purchase-modal" onclick="if(event.target===this) closePurchaseModal()">
-      <div class="modal-sheet">
-        <div class="modal-handle"></div>
-        <div class="modal-title-row">
-          <div class="modal-title" id="purchase-modal-title">Card name</div>
-          <div class="modal-close" onclick="closePurchaseModal()">✕</div>
-        </div>
-        <div class="modal-sub" id="purchase-modal-sub">OP00-000</div>
-        <div class="field-label" style="padding:0; margin-top:10px;">Purchase price</div>
-        <div class="form-row">
-          <input class="form-input" id="purchase-price-input" placeholder="0.00" style="flex:1;">
-          <input class="form-input" id="purchase-currency-input" value="JPY" style="flex:0 0 80px;">
-        </div>
-        <div class="modal-footnote" style="margin-top:10px;">Choose what happens once the price is saved.</div>
-        <button class="save-btn" style="margin:14px 0 8px; width:100%;" onclick="resolvePurchase('pending')">Save as Pending Delivery</button>
-        <button class="save-btn" style="margin:0 0 4px; width:100%; background:var(--teal); color:#04201d;" onclick="resolvePurchase('purchased')">Save as Purchased (in hand)</button>
-      </div>
-    </div>
-
-    <div class="modal-backdrop" id="slot-picker-modal" onclick="if(event.target===this) closeSlotPicker()">
-      <div class="modal-sheet">
-        <div class="modal-handle"></div>
-        <div class="modal-title-row">
-          <div class="modal-title">Place a card</div>
-          <div class="modal-close" onclick="closeSlotPicker()">✕</div>
-        </div>
-        <div class="modal-sub">Choose a card to fill this slot</div>
-        <input class="form-input" id="slot-picker-search" placeholder="Search by name or number…" style="margin:10px 0;" oninput="onSlotPickerSearch(this.value)">
-        <div id="slot-picker-results" style="max-height:340px; overflow-y:auto;"></div>
-      </div>
     </div>
   </div>
 
   <!-- ADD CARD -->
   <div class="screen" id="screen-add">
-    <div class="statusbar"><span>9:41</span><span>●●●●  📶  🔋</span></div>
     <div class="app-header">
       <div class="wordmark" style="font-size:18px;">Add Card</div>
       <div class="icon-btn" onclick="resetAddCardForm(); showScreen('dashboard')" title="Cancel">✕</div>
@@ -828,12 +1002,6 @@
       <div class="url-row">
         <input class="url-input" id="url-yuyutei" placeholder="yuyu-tei.jp/sell/opc/card/…">
         <button class="fetch-btn" onclick="fetchSource('yuyutei')">Fetch</button>
-      </div>
-
-      <div class="field-label">PriceCharting URL <span class="last-resort-tag">Last resort</span></div>
-      <div class="url-row">
-        <input class="url-input" id="url-pricecharting" placeholder="pricecharting.com/game/…">
-        <button class="fetch-btn" onclick="fetchSource('pricecharting')">Fetch</button>
       </div>
     </div>
 
@@ -859,42 +1027,59 @@
       </div>
     </div>
 
-    <div class="source-result pending" id="result-pricecharting">
-      <div class="source-thumb">?</div>
-      <div>
-        <div class="source-name">PriceCharting</div>
-        <div class="source-price">—</div>
-        <div class="source-cond">Not fetched yet</div>
-      </div>
-    </div>
-
-    <div class="helper-note">Market price = average of Toretoku + Yuyu-tei. PriceCharting is a last resort, used only when neither has data — and for Slabs, PriceCharting's PSA10 price is used as the reference instead. Image is downloaded in priority order (Toretoku → Yuyu-tei → PriceCharting) and stored in your own blob — nothing is hotlinked.</div>
+    <div class="helper-note">Market price = average of Toretoku + Yuyu-tei (whichever have data). Image is downloaded in priority order (Toretoku → Yuyu-tei) and stored in your own blob — nothing is hotlinked. PriceCharting was removed — it was reliably blocking requests from this app's hosting infrastructure with no code-side fix available (see HANDOVER.md §16/§18). Slabs currently have no auto-scraped reference price as a result.</div>
 
     <div class="section-label" style="margin-top:18px;">Card details</div>
     <div class="field-group" style="padding-bottom:4px;">
+      <div class="form-row" style="margin-bottom:4px;">
+        <input class="form-input" id="add-card-name" placeholder="Name (English — auto-translated from the scrape, editable)">
+      </div>
+      <div id="translate-status" style="margin:0 2px 8px; font-family:var(--mono); font-size:10px; color:var(--text-faint);"></div>
       <div class="form-row" style="margin-bottom:8px;">
-        <input class="form-input" id="add-card-name" placeholder="Card name">
+        <input class="form-input" id="add-card-name-original" placeholder="Original name (native language, auto-filled from the scrape)">
       </div>
       <div class="form-row" style="margin-bottom:8px;">
         <input class="form-input" id="add-card-number" placeholder="Card number (e.g. OP01-025)" style="flex:1;">
         <input class="form-input" id="add-card-rarity" placeholder="Rarity" style="flex:0 0 90px;">
       </div>
       <div class="form-row" style="margin-bottom:8px;">
+        <input class="form-input" id="add-card-artist" placeholder="Artist (manual — not auto-scraped)">
+      </div>
+      <div class="form-row" style="margin-bottom:8px;">
         <select class="form-input" id="add-card-category" style="flex:1;">
           <option value="">Category…</option>
-          <option>Leader</option><option>Character</option><option>Event</option><option>Stage</option>
+          <option>Leader</option><option>Character</option><option>Event</option><option>Stage</option><option>Don!!</option>
         </select>
         <select class="form-input" id="add-foil-type" style="flex:1;">
           <option value="">Foil type…</option>
           <option>Foil</option><option>Non-Foil</option><option>Textured Foil</option>
         </select>
       </div>
+      <div class="field-label" style="margin-top:4px;">Color <span style="font-weight:400; color:var(--text-faint);">(tap to select — cards can be more than one)</span></div>
+      <div class="chip-row" id="add-color-chips" style="margin-bottom:10px;">
+        <span class="chip-toggle" data-color="Red" onclick="toggleColorChip('Red', this)">Red</span>
+        <span class="chip-toggle" data-color="Green" onclick="toggleColorChip('Green', this)">Green</span>
+        <span class="chip-toggle" data-color="Blue" onclick="toggleColorChip('Blue', this)">Blue</span>
+        <span class="chip-toggle" data-color="Purple" onclick="toggleColorChip('Purple', this)">Purple</span>
+        <span class="chip-toggle" data-color="Black" onclick="toggleColorChip('Black', this)">Black</span>
+        <span class="chip-toggle" data-color="Yellow" onclick="toggleColorChip('Yellow', this)">Yellow</span>
+      </div>
+      <div class="field-label">Family / Type <span style="font-weight:400; color:var(--text-faint);">(e.g. Straw Hat Crew — type, press Enter)</span></div>
+      <div class="form-row" style="margin-bottom:6px;">
+        <input class="form-input" id="add-family-type-input" placeholder="Type a value and press Enter…" onkeydown="if(event.key==='Enter'){event.preventDefault(); addTagFrom('add-family-type-input','familyType');}">
+      </div>
+      <div class="chip-row" id="add-family-type-chips" style="margin-bottom:10px;"></div>
+      <div class="field-label">Collection <span style="font-weight:400; color:var(--text-faint);">(type, press Enter)</span></div>
+      <div class="form-row" style="margin-bottom:6px;">
+        <input class="form-input" id="add-collection-input" placeholder="Type a value and press Enter…" onkeydown="if(event.key==='Enter'){event.preventDefault(); addTagFrom('add-collection-input','collection');}">
+      </div>
+      <div class="chip-row" id="add-collection-chips" style="margin-bottom:10px;"></div>
       <div class="form-row" style="margin-bottom:8px;">
         <select class="form-input" id="add-language" style="flex:1;">
           <option value="Japanese">Japanese</option><option>English</option><option>Chinese</option>
         </select>
         <select class="form-input" id="add-condition-type" style="flex:1;" onchange="document.getElementById('slab-fields').style.display = this.value === 'Slabs' ? 'flex' : 'none';">
-          <option value="Singles">Singles</option><option value="Slabs">Slabs</option>
+          <option value="Singles">Singles</option><option value="Slabs">Slabs</option><option value="Sealed">Sealed</option>
         </select>
       </div>
       <div class="form-row" id="slab-fields" style="margin-bottom:8px; display:none;">
@@ -909,38 +1094,221 @@
       </div>
       <div class="form-row" style="margin-bottom:8px;">
         <input class="form-input" id="add-purchase-price" placeholder="Purchase price (blank = Wanted)">
-        <input class="form-input" id="add-purchase-currency" placeholder="Currency" value="JPY" style="flex:0 0 90px;">
+        <select class="form-input" id="add-purchase-currency" style="flex:0 0 90px;">
+          <option value="JPY" selected>JPY</option>
+          <option value="SGD">SGD</option>
+          <option value="AUD">AUD</option>
+          <option value="RMB">RMB</option>
+          <option value="MYR">MYR</option>
+          <option value="USD">USD</option>
+        </select>
       </div>
       <label style="display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--text-dim); margin-bottom:8px; padding:0 2px;">
         <input type="checkbox" id="add-received-checkbox" checked style="width:16px; height:16px;">
         Already received (uncheck if a price is set but the card hasn't arrived yet — Pending Delivery)
       </label>
-      <div class="form-row">
-        <input class="form-input" id="add-image-link" placeholder="Image link (optional — fallback only)">
+      <div class="form-row" style="align-items:center;">
+        <input class="form-input" id="add-image-link" placeholder="Image link (optional — fallback only)" style="flex:1;" oninput="updateImageLinkPreview(this.value)">
+        <div id="add-image-link-preview" class="thumb" style="display:none; flex:0 0 auto;"></div>
       </div>
+      <div class="field-label" style="margin-top:14px;">Additional photos (optional — e.g. Slab back)</div>
+      <div class="form-row" style="margin-bottom:6px; gap:8px;">
+        <label class="fetch-btn" style="flex:1; display:flex; align-items:center; justify-content:center; padding:10px; text-align:center;">
+          📁 Upload
+          <input type="file" id="add-extra-photos-file" accept="image/*" multiple style="display:none;" onchange="addExtraPhotoFiles(this)">
+        </label>
+        <label class="fetch-btn" style="flex:1; display:flex; align-items:center; justify-content:center; padding:10px; text-align:center;">
+          📷 Camera
+          <input type="file" id="add-extra-photos-camera" accept="image/*" capture="environment" style="display:none;" onchange="addExtraPhotoFiles(this)">
+        </label>
+      </div>
+      <div class="url-row" style="margin-bottom:6px;">
+        <input class="url-input" id="add-extra-photo-link" placeholder="Or paste an image link…">
+        <button class="fetch-btn" onclick="addExtraPhotoLink()">Add</button>
+      </div>
+      <div id="add-extra-photos-preview" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:4px;"></div>
     </div>
 
     <div id="add-card-status" style="margin: 4px 22px 0; font-family:var(--mono); font-size:11px; color:var(--teal);"></div>
     <button class="save-btn" onclick="saveCard()">Save to inventory</button>
 
-    <div class="bottom-nav">
-      <div class="nav-item" onclick="showScreen('dashboard')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-8 9 8M5 10v10h14V10"/></svg>Home</div>
-      <div class="nav-item" onclick="showScreen('inventory')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>Search</div>
-      <div class="nav-item center active"><div class="nav-icon-wrap"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg></div>Add</div>
-      <div class="nav-item" onclick="showScreen('binder')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16M3 10h18"/></svg>Binder</div>
+        <div class="bottom-nav">
+      <div class="nav-item" data-screen="dashboard" onclick="showScreen('dashboard')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-8 9 8M5 10v10h14V10"/></svg>Home</div>
+      <div class="nav-item" data-screen="inventory" onclick="showScreen('inventory')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>Inventory</div>
+      <div class="nav-item center" data-screen="add" onclick="showScreen('add')"><div class="nav-icon-wrap"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg></div>Add</div>
+      <div class="nav-item" data-screen="binder" onclick="showScreen('binder')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16M3 10h18"/></svg>Binder</div>
       <div class="nav-item"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21a8 8 0 00-16 0"/><circle cx="12" cy="7" r="4"/></svg>Me</div>
     </div>
   </div>
 
-</div>
+  <!-- Shared modal layer: all modal-backdrops live here as direct
+       children of .app-shell, not nested inside any one .screen.
+       Screens toggle via display:none/.active (see .screen CSS) — a
+       modal-backdrop nested inside a currently-hidden screen would
+       stay invisible even after its own .open class is added,
+       because display:none on an ancestor hides everything beneath
+       it regardless of position:fixed. That was the actual bug
+       behind "tapping X does nothing until I switch tabs" (Home
+       listing, binder image, Clone) — each modal used to sit inside
+       whichever screen it was FIRST designed for, not necessarily
+       the screen it can actually be opened FROM.
+  -->
+  <div class="modal-layer">
 
-<div class="controls">
-  <button class="ctrl-btn active" onclick="showScreen('dashboard', this)">Dashboard</button>
-  <button class="ctrl-btn" onclick="showScreen('inventory', this)">Inventory</button>
-  <button class="ctrl-btn" onclick="showScreen('binder', this)">Binder</button>
-  <button class="ctrl-btn" onclick="showScreen('add', this)">Add Card</button>
-</div>
-<div class="caption">TangStash — a personal One Piece TCG collection tracker.</div>
+        <div class="modal-backdrop" id="settings-modal" onpointerdown="armBackdropDismiss(event)" onclick="dismissBackdropIfArmed(event, closeSettingsModal)">
+      <div class="modal-sheet">
+        <div class="modal-handle"></div>
+        <div class="modal-title-row">
+          <div class="modal-title">Settings</div>
+          <div class="modal-close" onclick="closeSettingsModal()">✕</div>
+        </div>
+
+        <div class="field-label" style="margin-top:4px;">Appearance</div>
+        <div class="form-row" style="margin-bottom:16px;">
+          <button class="fetch-btn" id="theme-btn-dark" style="flex:1;" onclick="setTheme('dark')">🌙 Dark</button>
+          <button class="fetch-btn" id="theme-btn-light" style="flex:1; background:var(--ink-3); color:var(--text);" onclick="setTheme('light')">☀️ Light</button>
+        </div>
+
+        <div class="field-label">Display currency</div>
+        <div class="modal-sub" style="margin-bottom:8px;">Every price is stored in SGD internally and converted for display — this only changes how numbers are shown, not what's saved.</div>
+        <select class="form-input" id="display-currency-select" onchange="setDisplayCurrency(this.value)">
+          <option value="SGD">SGD — Singapore Dollar</option>
+          <option value="JPY">JPY — Japanese Yen</option>
+          <option value="AUD">AUD — Australian Dollar</option>
+          <option value="RMB">RMB — Chinese Yuan</option>
+          <option value="MYR">MYR — Malaysian Ringgit</option>
+          <option value="USD">USD — US Dollar</option>
+        </select>
+      </div>
+    </div>
+
+        <div class="modal-backdrop" id="price-modal" onpointerdown="armBackdropDismiss(event)" onclick="dismissBackdropIfArmed(event, closePriceBreakdown)">
+      <div class="modal-sheet">
+        <div class="modal-handle"></div>
+        <div class="modal-title-row">
+          <div class="modal-title" id="pm-title">Card name</div>
+          <div class="modal-close" onclick="closePriceBreakdown()">✕</div>
+        </div>
+        <div class="modal-sub" id="pm-sub">OP00-000</div>
+        <div id="pm-status-badge" class="pm-status-badge">Purchased</div>
+        <div id="pm-gallery" style="display:none; gap:8px; overflow-x:auto; padding:2px 0 12px;"></div>
+        <div style="display:flex; align-items:center; justify-content:space-between; margin:2px 0 6px;">
+          <div class="section-label" style="padding:0; margin:0;">Details</div>
+          <div class="modal-close" id="pm-edit-toggle-btn" onclick="toggleDetailEdit()" title="Edit sources &amp; photos">✎</div>
+        </div>
+        <div id="pm-details" class="pm-details-grid"></div>
+        <div id="pm-edit-form" style="display:none;"></div>
+        <div id="pm-pricing-section">
+          <div class="section-label" style="padding:0; margin:14px 0 6px;">Pricing</div>
+          <div id="pm-rows"></div>
+          <div class="modal-footnote">Market price = average of Toretoku + Yuyu-tei (whichever have data). Muted prices are from listings currently out of stock or not used in the calculation.</div>
+        </div>
+      </div>
+    </div>
+
+        <div class="modal-backdrop" id="new-binder-modal" onpointerdown="armBackdropDismiss(event)" onclick="dismissBackdropIfArmed(event, closeNewBinderModal)">
+      <div class="modal-sheet">
+        <div class="modal-handle"></div>
+        <div class="modal-title-row">
+          <div class="modal-title">New binder</div>
+          <div class="modal-close" onclick="closeNewBinderModal()">✕</div>
+        </div>
+        <div class="modal-sub">Manually arranged, like Main Collection</div>
+        <input class="form-input" id="new-binder-name" placeholder="e.g. For Trade, OP-09 Set" style="margin-top:4px;">
+        <button class="save-btn" style="margin:16px 0 4px; width:100%;" onclick="createBinder()">Create binder</button>
+      </div>
+    </div>
+
+        <div class="modal-backdrop" id="purchase-modal" onpointerdown="armBackdropDismiss(event)" onclick="dismissBackdropIfArmed(event, closePurchaseModal)">
+      <div class="modal-sheet">
+        <div class="modal-handle"></div>
+        <div class="modal-title-row">
+          <div class="modal-title" id="purchase-modal-title">Card name</div>
+          <div class="modal-close" onclick="closePurchaseModal()">✕</div>
+        </div>
+        <div class="modal-sub" id="purchase-modal-sub">OP00-000</div>
+        <div class="field-label" style="padding:0; margin-top:10px;">Purchase price</div>
+        <div class="form-row">
+          <input class="form-input" id="purchase-price-input" placeholder="0.00" style="flex:1;">
+          <select class="form-input" id="purchase-currency-input" style="flex:0 0 80px;">
+            <option value="JPY">JPY</option>
+            <option value="SGD">SGD</option>
+            <option value="AUD">AUD</option>
+            <option value="RMB">RMB</option>
+            <option value="MYR">MYR</option>
+            <option value="USD">USD</option>
+          </select>
+        </div>
+        <div class="modal-footnote" style="margin-top:10px;">Choose what happens once the price is saved.</div>
+        <button class="save-btn" style="margin:14px 0 8px; width:100%;" onclick="resolvePurchase('pending')">Save as Pending Delivery</button>
+        <button class="save-btn" style="margin:0 0 4px; width:100%; background:var(--teal); color:#04201d;" onclick="resolvePurchase('purchased')">Save as Purchased (in hand)</button>
+      </div>
+    </div>
+
+        <div class="modal-backdrop" id="clone-modal" onpointerdown="armBackdropDismiss(event)" onclick="dismissBackdropIfArmed(event, closeCloneModal)">
+      <div class="modal-sheet">
+        <div class="modal-handle"></div>
+        <div class="modal-title-row">
+          <div class="modal-title" id="clone-modal-title">Clone card</div>
+          <div class="modal-close" onclick="closeCloneModal()">✕</div>
+        </div>
+        <div class="modal-sub" id="clone-modal-sub">OP00-000</div>
+        <div class="modal-footnote" style="margin:0 0 12px;">Everything else copies from the original. Leave Purchase Price blank to clone as a new Wanted listing instead.</div>
+        <div class="field-label" style="padding:0;">Purchase price</div>
+        <div class="form-row" style="margin-bottom:10px;">
+          <input class="form-input" id="clone-purchase-price" placeholder="0.00" style="flex:1;">
+          <select class="form-input" id="clone-purchase-currency" style="flex:0 0 80px;">
+            <option value="JPY">JPY</option>
+            <option value="SGD">SGD</option>
+            <option value="AUD">AUD</option>
+            <option value="RMB">RMB</option>
+            <option value="MYR">MYR</option>
+            <option value="USD">USD</option>
+          </select>
+        </div>
+        <div class="field-label" style="padding:0;">Collection</div>
+        <div class="form-row" style="margin-bottom:10px;">
+          <input class="form-input" id="clone-collection" placeholder="e.g. Binder A + Display Case" style="flex:1;">
+        </div>
+        <div class="field-label" style="padding:0;">Sub-Condition</div>
+        <div class="form-row" style="margin-bottom:6px;">
+          <input class="form-input" id="clone-sub-condition" placeholder="Sub-condition (e.g. PSA10, White Dot, Sealed)" style="flex:1;">
+        </div>
+        <button class="save-btn" style="margin: 10px 0 0; width:100%;" onclick="submitClone()">Create clone</button>
+      </div>
+    </div>
+
+        <div class="modal-backdrop" id="slot-picker-modal" onpointerdown="armBackdropDismiss(event)" onclick="dismissBackdropIfArmed(event, closeSlotPicker)">
+      <div class="modal-sheet">
+        <div class="modal-handle"></div>
+        <div class="modal-title-row">
+          <div class="modal-title">Place a card</div>
+          <div class="modal-close" onclick="closeSlotPicker()">✕</div>
+        </div>
+        <div class="modal-sub">Choose a card to fill this slot</div>
+        <input class="form-input" id="slot-picker-search" placeholder="Search by name or number…" style="margin:10px 0;" oninput="onSlotPickerSearch(this.value)">
+        <div id="slot-picker-results" style="max-height:340px; overflow-y:auto;"></div>
+      </div>
+    </div>
+
+    <!-- Full-screen zoomable photo viewer, opened by tapping a thumbnail
+         in the detail sheet's photo strip (pm-gallery). Deliberately not
+         a .modal-backdrop/.modal-sheet — those are bottom-sheet styled;
+         this needs to be a centered, edge-to-edge viewer instead. Reuses
+         the same armBackdropDismiss/dismissBackdropIfArmed tap-outside-
+         to-close pattern as every other modal, for the same reason it
+         was needed there: a pinch/pan gesture on the image can trail a
+         synthetic click, and only dismissing when the PRESS (not just
+         the click) started on the backdrop itself avoids that closing
+         the viewer by accident mid-gesture.
+    -->
+    <div class="image-viewer-backdrop" id="image-viewer-modal" onpointerdown="armBackdropDismiss(event)" onclick="dismissBackdropIfArmed(event, closeImageViewer)">
+      <div class="modal-close" style="position:absolute; top:16px; right:16px; z-index:2;" onclick="closeImageViewer()">✕</div>
+      <div class="image-viewer-hint" id="image-viewer-hint">Pinch to zoom · double-tap to reset</div>
+      <img id="image-viewer-img" src="" alt="" draggable="false">
+    </div>
+  </div>
+
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
