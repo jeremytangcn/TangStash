@@ -1752,6 +1752,25 @@ function triggerImport() {
   document.getElementById("import-file-input").click();
 }
 
+// Recognizes a Listing UID cell that marks the row for DELETION instead
+// of create/update — "del"/"delete" (any case) attached to the front or
+// back of the UID, e.g. "TS-A2B3C-del", "delete-TS-A2B3C", "TS-A2B3Cdel".
+// Anchored on the app's own generated UID shape ("TS-" + 5 chars from a
+// fixed alphabet) rather than a looser "ends with del" pattern — that
+// alphabet includes D/E/L, so a real UID could coincidentally end in
+// "del" purely by chance, and treating that as a delete marker would
+// silently destroy a card instead of importing it. Returns the bare UID
+// to delete, or null if this cell isn't a delete marker at all.
+function parseUidForDelete(raw) {
+  const trimmed = String(raw || "").trim();
+  if (!trimmed) return null;
+  const uidMatch = trimmed.match(/TS-[A-Z0-9]{5}/i);
+  if (!uidMatch) return null;
+  const remainder = trimmed.replace(uidMatch[0], "").replace(/[-_.\s]/g, "").toLowerCase();
+  if (remainder === "del" || remainder === "delete") return uidMatch[0].toUpperCase();
+  return null;
+}
+
 async function handleImportFile(input) {
   const file = input.files && input.files[0];
   if (!file) return;
@@ -1764,7 +1783,37 @@ async function handleImportFile(input) {
     const workbook = XLSX.read(buffer, { type: "array" });
     const sheetName = workbook.SheetNames.includes("Cards") ? "Cards" : workbook.SheetNames[0];
     const sheet = workbook.Sheets[sheetName];
-    const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+    const allRows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+
+    // Split off delete-marked rows first — these only need a Listing
+    // UID, not a Card Name/Card Number, so they have to be pulled out
+    // before the "needs Card Name + Card Number" filter below, or a row
+    // that's just there to delete an existing card (nothing else filled
+    // in) would get silently dropped instead of acted on.
+    const idsToDelete = [];
+    const rows = [];
+    allRows.forEach((row) => {
+      const deleteUid = parseUidForDelete(row["Listing UID"]);
+      if (deleteUid) idsToDelete.push(deleteUid);
+      else rows.push(row);
+    });
+
+    let deletedCount = 0;
+    let deleteFailures = 0;
+    for (const id of idsToDelete) {
+      if (statusEl) statusEl.textContent = `Deleting ${deletedCount + deleteFailures + 1} of ${idsToDelete.length}…`;
+      try {
+        await apiJson(`${API_BASE}/inventory-delete`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id }),
+        });
+        deletedCount++;
+      } catch (err) {
+        deleteFailures++;
+        console.warn(`Delete failed for ${id}:`, err.message);
+      }
+    }
 
     const records = rows
       .filter((row) => String(row["Card Name"] || "").trim() && String(row["Card Number"] || "").trim())
@@ -1796,7 +1845,12 @@ async function handleImportFile(input) {
       });
 
     if (records.length === 0) {
-      if (statusEl) statusEl.textContent = "No valid rows found (need at least Card Name + Card Number).";
+      if (statusEl) {
+        statusEl.textContent = idsToDelete.length
+          ? `Deleted ${deletedCount} card(s).` + (deleteFailures ? ` ${deleteFailures} couldn't be deleted (already gone?).` : "")
+          : "No valid rows found (need at least Card Name + Card Number, or a Listing UID marked for deletion).";
+      }
+      if (idsToDelete.length) await refreshAll();
       return;
     }
 
@@ -1923,6 +1977,7 @@ async function handleImportFile(input) {
 
     if (statusEl) {
       let summary = `Imported ${data.saved.length} card(s). Total inventory: ${data.count}.`;
+      if (idsToDelete.length) summary += ` Deleted ${deletedCount} card(s).` + (deleteFailures ? ` ${deleteFailures} couldn't be deleted (already gone?).` : "");
       if (imageFailures) summary += ` (${imageFailures} image link${imageFailures === 1 ? "" : "s"} couldn't be fetched — check the URLs and retry those cards.)`;
       if (placementFailures.conflict) summary += ` ${placementFailures.conflict} Binder Placement${placementFailures.conflict === 1 ? "" : "s"} skipped — that slot was already taken.`;
       if (placementFailures.unparsed) summary += ` ${placementFailures.unparsed} Binder Placement${placementFailures.unparsed === 1 ? "" : "s"} couldn't be read — expected "<Binder Name> <Number>".`;
