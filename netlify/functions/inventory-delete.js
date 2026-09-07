@@ -1,16 +1,28 @@
 // netlify/functions/inventory-delete.js
 //
-// Removes one card from the inventory index. Same "single blob, no query
-// engine" pattern as inventory-list.js/inventory-save.js — read the
-// whole array, filter, write it back.
+// Removes one or more cards from the inventory index. Same "single blob,
+// no query engine" pattern as inventory-list.js/inventory-save.js — read
+// the whole array, filter, write it back.
 //
 // Usage: POST /.netlify/functions/inventory-delete
-//   body: { "id": "TS-A1B2C" }
+//   body: { "id": "TS-A1B2C" }              (single)
+//   body: { "ids": ["TS-A1B2C", "TS-D4E5F"] } (bulk)
 //
-// Only supports deleting by a single id (matches the swipe-to-delete UI
-// this was built for, one card at a time) — no bulk-delete endpoint
-// exists yet; add one here if a future UI needs it rather than looping
-// N single-delete calls from the client.
+// Bulk deletes MUST go through `ids` in one call, not a loop of single
+// `id` calls from the client — this was a real bug (not hypothetical):
+// the xlsx import's "delete" marker feature originally looped single
+// deletes, and each call independently does its own read-the-whole-
+// array / filter / write-it-back. That's a read-modify-write race: if a
+// later call's read doesn't yet reflect an earlier call's write (the
+// underlying blob store isn't guaranteed to be instantaneously
+// consistent for a get() immediately following a set()), the later
+// call computes "existing minus mine" from a stale array that still
+// has the earlier call's card in it, and silently resurrects it when
+// it writes back. Reported symptom: importing a file that marked all
+// 156 cards for deletion, the import reporting "156 deleted", and 76
+// cards still being there after a refresh — consistent with roughly
+// half the sequential calls racing each other. A single read + single
+// write for the whole batch has no interleaving to race with.
 //
 // NOTE: does not clean up the deleted card's stored image blob(s) — same
 // accepted trade-off as elsewhere (see HANDOVER §18): orphaned blobs are
@@ -37,22 +49,30 @@ exports.handler = async (event) => {
     return respond(400, { error: "Invalid JSON body" });
   }
 
-  const { id } = body;
-  if (!id) {
-    return respond(400, { error: "'id' is required" });
+  const ids = Array.isArray(body.ids) ? body.ids.filter(Boolean) : (body.id ? [body.id] : []);
+  if (ids.length === 0) {
+    return respond(400, { error: "'id' or 'ids' is required" });
   }
 
   try {
     const store = getStore(STORE_NAME);
     const existing = (await store.get(INDEX_KEY, { type: "json" })) || [];
-    const filtered = existing.filter((r) => r.id !== id);
+    const idSet = new Set(ids);
+    const filtered = existing.filter((r) => !idSet.has(r.id));
+    const deletedCount = existing.length - filtered.length;
 
-    if (filtered.length === existing.length) {
-      return respond(404, { error: `No card found with id ${id}` });
+    if (deletedCount === 0) {
+      return respond(404, {
+        error: ids.length === 1 ? `No card found with id ${ids[0]}` : "None of the given ids were found",
+      });
     }
 
     await store.setJSON(INDEX_KEY, filtered);
-    return respond(200, { deleted: id, count: filtered.length });
+    return respond(200, {
+      deleted: ids.length === 1 ? ids[0] : ids,
+      deletedCount,
+      count: filtered.length,
+    });
   } catch (err) {
     return respond(500, { error: err.message });
   }

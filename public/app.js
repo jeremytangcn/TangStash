@@ -1798,20 +1798,25 @@ async function handleImportFile(input) {
       else rows.push(row);
     });
 
+    // One bulk call, not a loop of single deletes — see
+    // inventory-delete.js's header comment for why a loop here is
+    // actually unsafe (a real, confirmed data-loss bug), not just
+    // slower.
     let deletedCount = 0;
     let deleteFailures = 0;
-    for (const id of idsToDelete) {
-      if (statusEl) statusEl.textContent = `Deleting ${deletedCount + deleteFailures + 1} of ${idsToDelete.length}…`;
+    if (idsToDelete.length) {
+      if (statusEl) statusEl.textContent = `Deleting ${idsToDelete.length} card(s)…`;
       try {
-        await apiJson(`${API_BASE}/inventory-delete`, {
+        const result = await apiJson(`${API_BASE}/inventory-delete`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id }),
+          body: JSON.stringify({ ids: idsToDelete }),
         });
-        deletedCount++;
+        deletedCount = result.deletedCount;
+        deleteFailures = idsToDelete.length - deletedCount; // ids that matched no existing card (already deleted, typo'd, etc.)
       } catch (err) {
-        deleteFailures++;
-        console.warn(`Delete failed for ${id}:`, err.message);
+        deleteFailures = idsToDelete.length;
+        console.warn("Bulk delete failed:", err.message);
       }
     }
 
