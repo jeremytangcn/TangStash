@@ -479,8 +479,16 @@ function toggleInventoryGroup(groupKey) {
 // computed on the next render, and groups silently never showed as
 // expanded. "::" is a normal printable string, so it round-trips
 // through HTML/innerHTML exactly as written.
+// Card Number + Card Name + Artist + Language — tightened again from
+// Card Number + Card Name alone: two listings can share both of those
+// yet still be genuinely different prints (a reprint with a different
+// artist credit, or the same card in two languages), so those two
+// fields join the key too. Same physical card, filed as multiple
+// listings, is what should still land in one group.
 function inventoryGroupKey(record) {
-  return String(record.cardNumber) + "::" + String(record.cardName);
+  return [record.cardNumber, record.cardName, record.artist, record.language]
+    .map((v) => String(v ?? ""))
+    .join("::");
 }
 
 function renderInventory() {
@@ -567,8 +575,10 @@ function renderInventoryGroup(group) {
 }
 
 function renderInventoryRow(record, nested) {
+  const purchase = purchasePriceSGD(record);
+  const purchaseText = purchase != null ? formatMoney(purchase) : "—";
   const market = computeMarketPrice(record);
-  const priceText = market.value != null ? formatMoney(market.value) : "—";
+  const marketText = market.value != null ? formatMoney(market.value) : "—";
   const { set, subset } = parseCardNumber(record.cardNumber);
   const qtyBadge =
     record.status === "Wanted" ? "On wishlist" :
@@ -610,9 +620,10 @@ function renderInventoryRow(record, nested) {
         </div>
         <div class="inv-right">
           <div class="price-line">
-            <div class="inv-price">${priceText}</div>
+            <div class="inv-price">${purchaseText}</div>
             <div class="info-btn" onclick="event.stopPropagation(); showPriceBreakdownFor('${escapeAttr(record.id)}')">?</div>
           </div>
+          <div class="inv-price-sub">${marketText}</div>
         </div>
       </div>
     </div>
@@ -1657,6 +1668,7 @@ const IMPORT_COLUMN_MAP = [
   ["Sub-Condition", "subCondition"],
   ["Grading Company", "gradingCompany"],
   ["Cert Number", "certNumber"],
+  ["Binder Placement", "binderPlacementRaw"],
 ];
 
 // Fields stored as arrays (multi-value) but represented as a single
@@ -1680,6 +1692,17 @@ const MULTI_VALUE_FIELDS = ["color", "familyType", "collection"];
 // the original URL, so there's nothing to round-trip there — and a
 // blank cell there is safe on re-import, since it just means "no NEW
 // photo to add" (existing photos are never touched by the import path).
+// Inverse of the import side's parsing (see handleImportFile) — turns a
+// record's current {key, page, slot} back into "<Binder Name> <Number>"
+// for export, so re-uploading an unedited export round-trips to the
+// exact same spot.
+function formatBinderPlacement(binder) {
+  if (!binder || binder.page == null || binder.slot == null) return "";
+  const name = binder.key === "main" ? "Main Collection" : (customBinders.find((b) => b.key === binder.key)?.name || binder.key);
+  const number = (binder.page - 1) * 9 + binder.slot + 1;
+  return `${name} ${number}`;
+}
+
 function exportInventoryTemplate() {
   if (!inventoryRecords.length) {
     showToast("No cards in inventory yet to export.");
@@ -1690,6 +1713,7 @@ function exportInventoryTemplate() {
     const row = {};
     IMPORT_COLUMN_MAP.forEach(([col, field]) => {
       if (field === "extraPhotoLinks") { row[col] = ""; return; }
+      if (field === "binderPlacementRaw") { row[col] = formatBinderPlacement(r.binder); return; }
       let value = r[field];
       if (MULTI_VALUE_FIELDS.includes(field)) {
         value = Array.isArray(value) ? value.join(" + ") : "";
@@ -1712,6 +1736,7 @@ function exportInventoryTemplate() {
     ["Listing UID", "Matches an existing card on re-import — updates it in place instead of creating a duplicate. Don't edit this."],
     ["Color / Family Type / Collection", "Multiple values are joined with ' + '."],
     ["Additional Photos", "Always blank on export — only a stored photo's blob survives, not its original link. Leave blank on re-import too; it won't remove any existing photos."],
+    ["Binder Placement", "\"<Binder Name> <Number>\" — reflects where this card is placed right now. Editing it and re-importing moves the card (or creates a new binder if the name doesn't exist); leaving it as-is on re-import keeps it exactly where it is."],
   ];
   const legendSheet = XLSX.utils.aoa_to_sheet(legendRows);
   legendSheet["!cols"] = [{ wch: 30 }, { wch: 95 }];
@@ -1794,7 +1819,6 @@ async function handleImportFile(input) {
         const links = [];
         if (rec.imageLink) links.push(rec.imageLink);
         if (rec.extraPhotoLinks) links.push(...rec.extraPhotoLinks);
-        delete rec.extraPhotoLinks; // not a real record field — never sent to inventory-save
 
         if (!links.length) continue;
         done++;
@@ -1821,6 +1845,73 @@ async function handleImportFile(input) {
         }
       }
     }
+    // Not a real record field, never sent to inventory-save — cleaned up
+    // unconditionally (previously this only ran inside the `if
+    // (rowsNeedingImages.length)` block above, so a batch where NOT ONE
+    // row had a photo link left every record carrying a stray empty
+    // `extraPhotoLinks: []`, harmlessly stored but never intended).
+    records.forEach((rec) => { delete rec.extraPhotoLinks; });
+
+    // "<Binder Name> <Number>" -> resolve/create the binder, convert the
+    // running slot count into {page, slot} (9 per page, in reading
+    // order), and only commit it if that exact spot is actually free —
+    // this never overwrites another card's placement, whether that
+    // card already existed or is also being placed by an earlier row in
+    // this same file.
+    const placementFailures = { unparsed: 0, conflict: 0 };
+    const occupiedSlots = new Map(); // "key|page|slot" -> an id (real or "row-<i>" for a new card)
+    inventoryRecords.forEach((r) => {
+      if (r.binder && r.binder.page != null && r.binder.slot != null) {
+        occupiedSlots.set(`${r.binder.key}|${r.binder.page}|${r.binder.slot}`, r.id);
+      }
+    });
+    const binderNameCache = new Map(); // lowercased name -> key, so repeated names in this file only create the binder once
+
+    async function resolveBinderKeyForImport(name) {
+      const trimmed = name.trim();
+      const lower = trimmed.toLowerCase();
+      if (lower === "main collection") return "main";
+      if (binderNameCache.has(lower)) return binderNameCache.get(lower);
+      const existing = customBinders.find((b) => b.name.trim().toLowerCase() === lower);
+      if (existing) {
+        binderNameCache.set(lower, existing.key);
+        return existing.key;
+      }
+      const created = await apiJson(`${API_BASE}/binders-save`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: trimmed }),
+      });
+      customBinders = created.binders;
+      binderNameCache.set(lower, created.binder.key);
+      return created.binder.key;
+    }
+
+    for (let i = 0; i < records.length; i++) {
+      const rec = records[i];
+      const raw = rec.binderPlacementRaw;
+      delete rec.binderPlacementRaw; // not a real record field
+      if (!raw) continue;
+
+      const match = String(raw).trim().match(/^(.+?)\s+(\d+)$/);
+      if (!match) { placementFailures.unparsed++; continue; }
+
+      const [, binderName, numberStr] = match;
+      const number = parseInt(numberStr, 10);
+      if (number < 1) { placementFailures.unparsed++; continue; }
+
+      const page = Math.ceil(number / 9);
+      const slot = (number - 1) % 9;
+      const binderKey = await resolveBinderKeyForImport(binderName);
+      const slotKey = `${binderKey}|${page}|${slot}`;
+      const claimant = rec.id || `row-${i}`;
+      const occupant = occupiedSlots.get(slotKey);
+
+      if (occupant && occupant !== claimant) { placementFailures.conflict++; continue; }
+
+      occupiedSlots.set(slotKey, claimant);
+      rec.binder = { key: binderKey, page, slot };
+    }
 
     if (statusEl) statusEl.textContent = `Uploading ${records.length} card(s)…`;
 
@@ -1831,8 +1922,11 @@ async function handleImportFile(input) {
     });
 
     if (statusEl) {
-      statusEl.textContent = `Imported ${data.saved.length} card(s). Total inventory: ${data.count}.`
-        + (imageFailures ? ` (${imageFailures} image link${imageFailures === 1 ? "" : "s"} couldn't be fetched — check the URLs and retry those cards.)` : "");
+      let summary = `Imported ${data.saved.length} card(s). Total inventory: ${data.count}.`;
+      if (imageFailures) summary += ` (${imageFailures} image link${imageFailures === 1 ? "" : "s"} couldn't be fetched — check the URLs and retry those cards.)`;
+      if (placementFailures.conflict) summary += ` ${placementFailures.conflict} Binder Placement${placementFailures.conflict === 1 ? "" : "s"} skipped — that slot was already taken.`;
+      if (placementFailures.unparsed) summary += ` ${placementFailures.unparsed} Binder Placement${placementFailures.unparsed === 1 ? "" : "s"} couldn't be read — expected "<Binder Name> <Number>".`;
+      statusEl.textContent = summary;
     }
     await refreshAll();
   } catch (err) {
@@ -2415,8 +2509,27 @@ function renderManualBinder(binderKey, gridId, labelId, subId, prevBtnId, nextBt
   if (pageNumbers.length === 0) pageNumbers.push(1);
   if (!pages[pageNumbers[0]]) pages[pageNumbers[0]] = Array(9).fill(null);
 
-  let current = getPage();
-  if (!pageNumbers.includes(current)) current = pageNumbers[0];
+  // Pages the user can actually be on: every real page (has a card
+  // somewhere on it) plus every blank page needed to reach either one
+  // past the last real page, OR whatever blank page is already being
+  // requested — whichever is further. That second part matters:
+  // without it, clicking "next" repeatedly across several blank pages
+  // in a row (nothing placed yet on any of them) silently bounced back
+  // to page 1 on the second click, because pagesForBinder() only ever
+  // reports pages that already have a card in them, so a fresh render
+  // recomputing "one past the last real page" from scratch would never
+  // reach further than page 2 no matter how many times "next" was
+  // clicked. Building the full contiguous range up to whichever page
+  // is actually requested also means a real gap (cards on page 1 and 3
+  // but nothing on 2) is still navigable in order, not skipped.
+  const maxReal = pageNumbers[pageNumbers.length - 1];
+  const requested = Number(getPage());
+  const maxDisplayable = Math.max(maxReal + 1, Number.isFinite(requested) ? requested : 0);
+  const displayablePages = [];
+  for (let p = pageNumbers[0]; p <= maxDisplayable; p++) displayablePages.push(p);
+
+  let current = requested;
+  if (!displayablePages.includes(current)) current = pageNumbers[0];
   setPage(current);
 
   const slots = pages[current] || Array(9).fill(null);
@@ -2433,17 +2546,17 @@ function renderManualBinder(binderKey, gridId, labelId, subId, prevBtnId, nextBt
   if (labelEl) labelEl.textContent = "Page " + current;
   if (subEl) subEl.textContent = cardsForBinder(binderKey).length + " card(s) in this binder";
 
-  const idx = pageNumbers.indexOf(current);
+  const idx = displayablePages.indexOf(current);
   const prevBtn = document.getElementById(prevBtnId);
   const nextBtn = document.getElementById(nextBtnId);
   if (prevBtn) {
     prevBtn.classList.toggle("disabled", idx <= 0);
-    prevBtn.onclick = () => { if (idx > 0) { setPage(pageNumbers[idx - 1]); renderManualBinder(binderKey, gridId, labelId, subId, prevBtnId, nextBtnId, getPage, setPage); } };
+    prevBtn.onclick = () => { if (idx > 0) { setPage(displayablePages[idx - 1]); renderManualBinder(binderKey, gridId, labelId, subId, prevBtnId, nextBtnId, getPage, setPage); } };
   }
   if (nextBtn) {
-    const atEnd = idx >= pageNumbers.length - 1;
     nextBtn.onclick = () => {
-      const nextPage = atEnd ? pageNumbers[pageNumbers.length - 1] + 1 : pageNumbers[idx + 1];
+      const atEnd = idx >= displayablePages.length - 1;
+      const nextPage = atEnd ? displayablePages[displayablePages.length - 1] + 1 : displayablePages[idx + 1];
       setPage(nextPage);
       renderManualBinder(binderKey, gridId, labelId, subId, prevBtnId, nextBtnId, getPage, setPage);
     };
@@ -2750,26 +2863,78 @@ function rerenderBinderScreen() {
 function renderAutoBinders() {
   renderAutoBinderGrid("pending", "Pending Delivery");
   renderAutoBinderGrid("wanted", "Wanted");
-  renderAutoBinderList("pending");
-  renderAutoBinderList("wanted");
+}
+
+let pendingBinderPage = 1;
+let wantedBinderPage = 1;
+
+// Wanted cards sort by an explicit, user-set priority (see
+// setWantedPriority) — a card with no priority yet sorts after every
+// explicitly-ranked one, falling back to Card Number so the order
+// stays stable and predictable before anyone's ranked anything.
+// Pending Delivery (and everything else) keeps statusFilteredRecords'
+// own plain Card Number sort untouched.
+function sortedRecordsForBinder(status) {
+  const records = statusFilteredRecords(status);
+  if (status !== "Wanted") return records;
+  return [...records].sort((a, b) => {
+    const pa = a.priority != null ? Number(a.priority) : Infinity;
+    const pb = b.priority != null ? Number(b.priority) : Infinity;
+    if (pa !== pb) return pa - pb;
+    return String(a.cardNumber).localeCompare(String(b.cardNumber));
+  });
 }
 
 function renderAutoBinderGrid(binderKey, status) {
   const gridEl = document.querySelector(`#binder-view-${binderKey} .binder-grid`);
   if (!gridEl) return;
-  const records = statusFilteredRecords(status);
+
+  // Paginated the same 9-per-page way Main Collection/custom binders
+  // are — this used to just take the first 9 records and stop, with no
+  // way to see the rest at all once a binder passed 9 cards.
+  const allRecords = sortedRecordsForBinder(status);
+  const totalPages = Math.max(1, Math.ceil(allRecords.length / 9));
+  let page = binderKey === "pending" ? pendingBinderPage : wantedBinderPage;
+  page = Math.min(Math.max(1, page), totalPages);
+  if (binderKey === "pending") pendingBinderPage = page; else wantedBinderPage = page;
+
   const slots = Array(9).fill(null);
-  records.slice(0, 9).forEach((r, i) => { slots[i] = r; });
+  allRecords.slice((page - 1) * 9, page * 9).forEach((r, i) => { slots[i] = r; });
 
   // Pending Delivery, in select mode: tapping a filled slot toggles
   // selection instead of opening the detail sheet, sharing the same
   // pendingSelectedIds state (and staying in sync with) the list below.
   if (binderKey === "pending" && pendingSelectMode) {
     gridEl.innerHTML = slots.map((rec, i) => pendingSelectableSlotHtml(i, rec)).join("");
-    return;
+  } else {
+    gridEl.innerHTML = slots.map((rec, i) => slotHtml(i, rec, { autoEmpty: true, onFilledClick: binderKey === "wanted" ? "openPurchaseModalFor" : "openBinderCardDetail" })).join("");
   }
 
-  gridEl.innerHTML = slots.map((rec, i) => slotHtml(i, rec, { autoEmpty: true, onFilledClick: binderKey === "wanted" ? "openPurchaseModalFor" : "openBinderCardDetail" })).join("");
+  const labelEl = document.getElementById(binderKey + "-page-label");
+  if (labelEl) labelEl.textContent = `Page ${page} of ${totalPages}`;
+
+  // Unlike Main Collection/custom binders, there's no "create a new page
+  // by going past the end" here — this binder's pages are entirely
+  // derived from however many Wanted/Pending cards currently exist, so
+  // both buttons just disable at their real bound.
+  const prevBtn = document.getElementById(binderKey + "-prev-btn");
+  const nextBtn = document.getElementById(binderKey + "-next-btn");
+  if (prevBtn) {
+    prevBtn.classList.toggle("disabled", page <= 1);
+    prevBtn.onclick = () => {
+      if (binderKey === "pending") pendingBinderPage = Math.max(1, pendingBinderPage - 1);
+      else wantedBinderPage = Math.max(1, wantedBinderPage - 1);
+      renderAutoBinderGrid(binderKey, status);
+    };
+  }
+  if (nextBtn) {
+    nextBtn.classList.toggle("disabled", page >= totalPages);
+    nextBtn.onclick = () => {
+      if (binderKey === "pending") pendingBinderPage = Math.min(totalPages, pendingBinderPage + 1);
+      else wantedBinderPage = Math.min(totalPages, wantedBinderPage + 1);
+      renderAutoBinderGrid(binderKey, status);
+    };
+  }
 }
 
 function pendingSelectableSlotHtml(index, record) {
@@ -2796,42 +2961,43 @@ function pendingSelectableSlotHtml(index, record) {
     </div>`;
 }
 
-function renderAutoBinderList(binderKey) {
-  const status = binderKey === "pending" ? "Pending Delivery" : "Wanted";
-  const container = document.getElementById(`${binderKey}-list`);
-  if (!container) return;
-  const records = statusFilteredRecords(status);
+// Re-ranks the whole Wanted list so the edited card lands at EXACTLY the
+// typed position, shifting only the cards between its old and new spot —
+// not a simple two-card swap. E.g. moving card #14 to priority 1 pushes
+// cards 1-13 down to 2-14; moving card #20 to priority 6 leaves 1-5
+// untouched and pushes (the old) 6-19 down to 7-20, with this card
+// landing at exactly 6. Every currently-Wanted record's priority gets
+// rewritten to match its resulting position (1..N, no gaps) so the
+// order stays a clean total ordering even for cards that never had an
+// explicit priority set before.
+async function setWantedPriority(recordId, rawValue) {
+  const newPriority = parseInt(rawValue, 10);
+  const ordered = sortedRecordsForBinder("Wanted");
+  const fromIndex = ordered.findIndex((r) => r.id === recordId);
+  if (fromIndex === -1) return;
 
-  if (records.length === 0) {
-    container.innerHTML = `<div class="inv-loading" style="margin:0 0 14px;">Nothing here right now.</div>`;
-    return;
-  }
+  const [moved] = ordered.splice(fromIndex, 1);
+  const targetIndex = isNaN(newPriority) ? ordered.length : newPriority - 1;
+  const clampedIndex = Math.max(0, Math.min(ordered.length, targetIndex));
+  ordered.splice(clampedIndex, 0, moved);
 
-  if (binderKey === "wanted") {
-    container.innerHTML = records.map((r) => `
-      <div class="row-card" onclick="openPurchaseModalFor('${escapeAttr(r.id)}')" style="cursor:pointer;">
-        <div class="thumb"></div>
-        <div>
-          <div class="row-title">${escapeHtml(r.cardName)}</div>
-          <div class="row-sub">${escapeHtml(r.cardNumber)} · ${escapeHtml(r.language || "")}</div>
-        </div>
-        <div class="row-value"><div class="amt">${formatMoney(computeMarketPrice(r).value)}</div></div>
-      </div>
-    `).join("");
-  } else {
-    container.innerHTML = records.map((r) => `
-      <div class="selectable-row" data-id="${escapeAttr(r.id)}">
-        <div class="select-check${pendingSelectedIds.has(r.id) ? " checked" : ""}" onclick="toggleCardSelection('${escapeAttr(r.id)}')"></div>
-        <div class="row-card" style="margin:0; flex:1;">
-          <div class="thumb"></div>
-          <div>
-            <div class="row-title">${escapeHtml(r.cardName)}</div>
-            <div class="row-sub">${escapeHtml(r.cardNumber)} · ${escapeHtml(r.language || "")}</div>
-          </div>
-          <div class="row-value"><div class="amt">${formatMoney(computeMarketPrice(r).value)}</div></div>
-        </div>
-      </div>
-    `).join("");
+  const updates = ordered.map((r, i) => ({ ...r, priority: i + 1 }));
+
+  try {
+    await apiJson(`${API_BASE}/inventory-save`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ records: updates }),
+    });
+    await refreshAll();
+    // Jump the Wanted binder to wherever the card actually landed (9
+    // per page, clampedIndex is 0-based) so the new ranking is visible
+    // right away instead of leaving the view on whatever page it was
+    // on before.
+    wantedBinderPage = Math.floor(clampedIndex / 9) + 1;
+    rerenderBinderScreen();
+  } catch (err) {
+    showToast("Couldn't update priority: " + err.message);
   }
 }
 
@@ -2852,7 +3018,6 @@ function toggleSelectMode(binderKey) {
   document.getElementById(binderKey + "-select-toggle").classList.toggle("active", pendingSelectMode);
   document.getElementById(binderKey + "-select-toggle").textContent = pendingSelectMode ? "Cancel" : "Select";
   renderAutoBinderGrid(binderKey, "Pending Delivery");
-  renderAutoBinderList(binderKey);
   updateBulkBar(binderKey);
 }
 
@@ -2860,7 +3025,6 @@ function toggleCardSelection(id) {
   if (pendingSelectedIds.has(id)) pendingSelectedIds.delete(id);
   else pendingSelectedIds.add(id);
   renderAutoBinderGrid("pending", "Pending Delivery");
-  renderAutoBinderList("pending");
   updateBulkBar("pending");
 }
 
@@ -2920,9 +3084,27 @@ function openPurchaseModalFor(recordId) {
   purchaseCardId = recordId;
   document.getElementById("purchase-modal-title").textContent = record.cardName;
   document.getElementById("purchase-modal-sub").textContent = `${record.cardNumber} · ${record.language || ""}`;
+  document.getElementById("purchase-priority-input").value = record.priority != null ? record.priority : "";
   document.getElementById("purchase-price-input").value = "";
   document.getElementById("purchase-currency-input").value = record.purchaseCurrency || "SGD";
   document.getElementById("purchase-modal").classList.add("open");
+}
+
+// Separate from resolvePurchase() below on purpose — setting a priority
+// is just reordering the Wanted list, not a purchase decision, so it
+// shouldn't force the card to become Purchased/Pending. Re-opens the
+// same card's popup afterward (rather than closing outright) so the
+// updated ranking is visible immediately if the person wants to keep
+// adjusting it.
+// Closes the pop-up and lands on whichever page the card actually moved
+// to (see setWantedPriority) rather than reopening any card's detail —
+// the person just wants to see the result of the reorder in place.
+async function saveWantedPriorityFromModal() {
+  const value = document.getElementById("purchase-priority-input").value;
+  const recordId = purchaseCardId;
+  await setWantedPriority(recordId, value);
+  closePurchaseModal();
+  showToast("Priority updated.");
 }
 
 function closePurchaseModal() {

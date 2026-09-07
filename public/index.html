@@ -192,6 +192,12 @@
     padding:12px 14px;
     display:flex; align-items:center; gap:12px;
   }
+  .priority-input{
+    width:40px; flex-shrink:0; text-align:center;
+    font-family:var(--mono); font-size:16px; font-weight:700;
+    background: var(--ink-3); border:1px solid var(--line); border-radius:8px;
+    color: var(--gold-soft); padding:6px 2px;
+  }
   .thumb{
     width:40px; height:56px; border-radius:6px;
     background: linear-gradient(160deg, #2a2f3f, #171a24);
@@ -222,6 +228,13 @@
   .filter-row{
     display:flex; gap:8px; padding: 0 22px 14px;
     overflow-x:auto; scrollbar-width:none; -ms-overflow-style:none;
+    /* Explicit hint that this row owns horizontal touch panning itself
+       — without it, some mobile browsers can end up ambiguous about
+       whether a horizontal drag here is a scroll gesture or something
+       else, especially once nested inside a page that also scrolls
+       vertically. -webkit-overflow-scrolling gives it iOS's native
+       momentum/inertia rather than a hard stop. */
+    touch-action: pan-x; -webkit-overflow-scrolling: touch;
   }
   .filter-row::-webkit-scrollbar{ display:none; }
   .filter-item{ position:relative; flex-shrink:0; }
@@ -304,6 +317,7 @@
   }
   .inv-right{ text-align:right; }
   .inv-price{ font-family:var(--mono); font-weight:700; font-size:13.5px; }
+  .inv-price-sub{ font-family:var(--mono); font-size:10.5px; color:var(--text-faint); margin-top:3px; text-align:right; }
   .inv-pl{ font-family:var(--mono); font-size:10.5px; color:var(--teal); margin-top:2px; }
   .inv-pl.down{ color:var(--coral); }
 
@@ -580,7 +594,7 @@
   .url-row{ display:flex; gap:8px; }
   .url-input{
     flex:1; background:var(--ink-2); border:1px solid var(--line); border-radius:12px;
-    padding:11px 12px; font-family:var(--mono); font-size:11.5px; color:var(--text);
+    padding:11px 12px; font-family:var(--mono); font-size:16px; color:var(--text);
   }
   .url-input::placeholder{ color:var(--text-faint); }
   .fetch-btn{
@@ -615,9 +629,19 @@
     padding:3px 8px; border-radius:100px; white-space:nowrap;
   }
 
+  /* All four text-input-ish font-sizes on this page (.form-input,
+     .url-input, .priority-input, and the Inventory search bar's inline
+     style below) are 16px, not the smaller sizes used everywhere else
+     in the app's type scale. This is deliberate, not an oversight: iOS
+     Safari (and some Android browsers) auto-zooms the whole page in
+     when focusing any input/select/textarea with a font-size under
+     16px, on the theory that the text is too small to read — and
+     doesn't reliably zoom back out afterward, leaving the page stuck
+     zoomed in until the person manually pinches back out. 16px is the
+     threshold that avoids triggering it at all. */
   .form-input{
     width:100%; background: var(--ink-2); border:1px solid var(--line); border-radius:12px;
-    padding:11px 12px; font-family:var(--body); font-size:13px; color:var(--text);
+    padding:11px 12px; font-family:var(--body); font-size:16px; color:var(--text);
   }
   .form-row{ display:flex; gap:8px; }
   .form-row .form-input{ flex:1; }
@@ -674,7 +698,19 @@
     width:100%; background: var(--ink-2); border:1px solid var(--line);
     border-radius: 22px 22px 0 0; padding: 18px 20px 26px;
     box-shadow: 0 -20px 50px rgba(0,0,0,0.5);
-    max-height: 85vh; overflow-y: auto;
+    /* 85vh alone can be TALLER than what's actually visible on mobile —
+       `vh` is classically computed against the largest possible
+       viewport (address bar hidden), not the one currently on screen,
+       so a sheet sized against it can have its bottom portion (like
+       Settings' currency picker, below the theme buttons) pushed below
+       the real fold with no way to reach it: the backdrop is
+       position:fixed so the page can't scroll to reveal more of it, and
+       the sheet's own overflow-y never kicks in since its content never
+       exceeded the (inflated) 85vh in the first place. dvh is measured
+       against the real, current viewport instead — this line is a
+       progressive enhancement; browsers that don't support dvh just
+       ignore it and keep the vh value above. */
+    max-height: 85vh; max-height: 85dvh; overflow-y: auto;
   }
   .pm-status-badge{
     display:inline-block; margin-top:8px; font-family:var(--mono); font-size:10.5px; font-weight:700;
@@ -825,7 +861,7 @@
     </div>
     <div id="import-status" style="margin: 0 22px 8px; font-family:var(--mono); font-size:10.5px; color:var(--teal);"></div>
     <div class="search-bar" style="position:relative;">
-      🔍 &nbsp;<input id="inv-search-input" oninput="onInventorySearch(this.value)" placeholder="Search by name or number…" style="background:none; border:none; outline:none; color:var(--text); font-family:var(--body); font-size:13.5px; flex:1;">
+      🔍 &nbsp;<input id="inv-search-input" oninput="onInventorySearch(this.value)" placeholder="Search by name or number…" style="background:none; border:none; outline:none; color:var(--text); font-family:var(--body); font-size:16px; flex:1;">
     </div>
     <div style="margin: -8px 22px 12px; font-family:var(--mono); font-size:10px; color:var(--text-faint);">
       Need the update/import template? <a href="tangstash-import-template.xlsx" download style="color:var(--teal);">Download it here</a> or <a href="#" onclick="event.preventDefault(); exportInventoryTemplate();" style="color:var(--teal);">Export it here</a>.
@@ -939,17 +975,20 @@
 
     <!-- PENDING DELIVERY (auto binder) -->
     <div class="binder-view" id="binder-view-pending">
-      <div class="auto-binder-note">Auto-generated from cards marked <b>Pending Delivery</b> in Inventory — updates by itself, can't be manually rearranged.</div>
-      <div class="binder-page">
-        <div class="binder-grid"></div>
+      <div class="binder-header">
+        <div class="binder-nav-btn" id="pending-prev-btn">‹</div>
+        <div><div class="page-label" style="text-align:center;" id="pending-page-label">Page 1</div><div class="page-sub" id="pending-page-sub">Pending Delivery</div></div>
+        <div class="binder-nav-btn" id="pending-next-btn">›</div>
       </div>
 
       <div class="select-row">
-        <div class="section-label" style="padding:0; margin:0;">In this binder</div>
+        <div class="section-label" style="padding:0; margin:0;">&nbsp;</div>
         <div class="select-toggle" id="pending-select-toggle" onclick="toggleSelectMode('pending')">Select</div>
       </div>
 
-      <div id="pending-list"><div class="inv-loading" style="margin:0 0 14px;">Loading…</div></div>
+      <div class="binder-page">
+        <div class="binder-grid"></div>
+      </div>
 
       <div class="bulk-action-bar" id="pending-bulk-bar">
         <div class="bulk-count" id="pending-bulk-count">0 selected</div>
@@ -962,12 +1001,14 @@
 
     <!-- WANTED (auto binder) -->
     <div class="binder-view" id="binder-view-wanted">
-      <div class="auto-binder-note">Auto-generated from cards marked <b>Wanted</b> in Inventory — updates by itself, can't be manually rearranged. Tap a card to log a purchase.</div>
+      <div class="binder-header">
+        <div class="binder-nav-btn" id="wanted-prev-btn">‹</div>
+        <div><div class="page-label" style="text-align:center;" id="wanted-page-label">Page 1</div><div class="page-sub" id="wanted-page-sub">Wanted</div></div>
+        <div class="binder-nav-btn" id="wanted-next-btn">›</div>
+      </div>
       <div class="binder-page">
         <div class="binder-grid"></div>
       </div>
-      <div class="section-label">In this binder</div>
-      <div id="wanted-list"><div class="inv-loading" style="margin:0 0 14px;">Loading…</div></div>
     </div>
 
     <!-- placeholder for user-created binders -->
@@ -1227,7 +1268,12 @@
           <div class="modal-close" onclick="closePurchaseModal()">✕</div>
         </div>
         <div class="modal-sub" id="purchase-modal-sub">OP00-000</div>
-        <div class="field-label" style="padding:0; margin-top:10px;">Purchase price</div>
+        <div class="field-label" style="padding:0; margin-top:10px;">Priority <span style="font-weight:400; color:var(--text-faint);">(lower ranks first — this card's spot in the Wanted binder)</span></div>
+        <div class="form-row">
+          <input class="form-input" id="purchase-priority-input" type="number" min="1" placeholder="Not ranked yet" style="flex:1;">
+          <button class="fetch-btn" style="flex:0 0 auto;" onclick="saveWantedPriorityFromModal()">Save</button>
+        </div>
+        <div class="field-label" style="padding:0; margin-top:14px;">Purchase price</div>
         <div class="form-row">
           <input class="form-input" id="purchase-price-input" placeholder="0.00" style="flex:1;">
           <select class="form-input" id="purchase-currency-input" style="flex:0 0 80px;">

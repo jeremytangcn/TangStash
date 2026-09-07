@@ -76,7 +76,15 @@ exports.handler = async (event) => {
     const $ = cheerio.load(html);
     const data = parser($, url);
 
-    if (!data.price) {
+    // Previously: any listing where a price couldn't be parsed (most
+    // commonly because it's out of stock — see the "muted prices" note
+    // in the app's own UI, which already anticipates this) discarded
+    // EVERYTHING, including a successfully-scraped image and card name.
+    // That meant an out-of-stock Yuyu-tei listing came back as a total
+    // failure — no thumbnail either — even though the page's image was
+    // sitting right there in the same HTML. Only fail outright when
+    // there's truly nothing usable at all.
+    if (!data.price && !data.imageUrl && !data.cardName) {
       return respond(422, {
         error: "Could not parse a price from this page - site markup may have changed",
         source: hostname,
