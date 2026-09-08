@@ -50,10 +50,12 @@ exports.handler = async (event) => {
     const byId = new Map(existing.map((r) => [r.id, r]));
 
     const savedIds = [];
+    const skipped = []; // { record, error } — invalid rows don't abort the whole batch anymore
     for (const rec of incoming) {
       const validation = validateRecord(rec);
       if (validation) {
-        return respond(422, { error: validation, record: rec });
+        skipped.push({ record: rec, error: validation });
+        continue;
       }
 
       const id = rec.id && byId.has(rec.id) ? rec.id : generateListingUid();
@@ -77,7 +79,7 @@ exports.handler = async (event) => {
     const updatedList = Array.from(byId.values());
     await store.setJSON(INDEX_KEY, updatedList);
 
-    return respond(200, { saved: savedIds, count: updatedList.length });
+    return respond(200, { saved: savedIds, count: updatedList.length, skipped });
   } catch (err) {
     return respond(500, { error: err.message });
   }
@@ -85,7 +87,6 @@ exports.handler = async (event) => {
 
 function validateRecord(rec) {
   if (!rec.cardName) return "cardName is required";
-  if (!rec.cardNumber) return "cardNumber is required";
   if (rec.quantity !== undefined && ![0, 1, "0", "1"].includes(rec.quantity)) {
     return "quantity must be 0 or 1";
   }

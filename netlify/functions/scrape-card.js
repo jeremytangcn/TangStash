@@ -136,11 +136,30 @@ function parseYuyuTei($) {
   }
   const price = toNumber(priceText);
 
-  // Verified real image URL format: card.yuyu-tei.jp/opc/front/<set>/<id>.jpg
-  const imageUrl = $("img[src*='card.yuyu-tei.jp']").first().attr("src") || null;
+  // og:image first, not a raw <img src> — matches parseToretoku()'s own
+  // fix below for the exact same reason: a lazy-loaded image's real src
+  // is only populated by client-side JS this scraper never runs, so the
+  // initial HTML can have an empty/placeholder src while the meta tag
+  // (always server-rendered) still has the real URL. This parser was
+  // never updated with that fix when Toretoku's was — several Yuyu-tei
+  // listings (promo cards in particular) were still coming back with no
+  // image at all as a result. Falls back to the old domain-specific
+  // <img> selector only if the meta tag is somehow missing.
+  const imageUrl = $('meta[property="og:image"]').attr("content")
+    || $("img[src*='card.yuyu-tei.jp']").first().attr("src")
+    || null;
 
-  const title = $("h1").first().text().trim();
-  // Title format is like "P-SR ロロノア・ゾロ(パラレル) | 販売 | [OP01]..."
+  // <title> first, not <h1> — same reasoning as parseToretoku()'s name
+  // extraction: a page's <h1> isn't guaranteed to be the card title on
+  // every template this site uses (Toretoku's turned out to be the site
+  // header/nav, not the product name, on the listing it was checked
+  // against) and there's no confirmation Yuyu-tei's h1 holds up the same
+  // way across its own template variants (promo vs. regular numbered
+  // cards, for instance). <title> is reliably server-rendered either
+  // way. Title format is like "P-SR ロロノア・ゾロ(パラレル) | 販売 | [OP01]...".
+  const rawTitle = $("title").first().text().trim();
+  const h1Title = $("h1").first().text().trim();
+  const title = rawTitle || h1Title;
   const cardNumberMatch = $("body").text().match(/OP\d{2}-\d{3}|ST\d{2}-\d{3}|EB\d{2}-\d{3}|P-\d{3}/);
 
   return {

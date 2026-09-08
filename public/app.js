@@ -84,11 +84,15 @@ document.addEventListener("DOMContentLoaded", async () => {
 // binder-page is currently visible — works for Main Collection and any
 // custom binder, since both render inside a ".binder-view.active .binder-page".
 //
-// Swipe RIGHT (finger moves right, dx > 0) -> NEXT page. This matches
-// the "turning a physical page forward" feel users expect for a binder,
-// and is the opposite of a typical photo-gallery "swipe left to advance"
-// convention — deliberately chosen to match explicit user feedback that
-// swiping right should move forward, not back.
+// Swipe LEFT (finger moves left, dx < 0) -> NEXT page; swipe RIGHT
+// (dx > 0) -> PREVIOUS page. Matches a typical horizontally-paged
+// gallery/carousel convention (content slides in from the right as you
+// advance) — flipped from an earlier version that went the other way,
+// per explicit follow-up feedback that this direction is the one that
+// actually feels right. Vertical drags are untouched either way — see
+// .binder-page's touch-action:pan-y, which is what lets the page scroll
+// normally on a vertical swipe; this handler only ever acts once a
+// gesture's horizontal distance clears the threshold below.
 //
 // No longer excludes gestures starting on a filled slot (attachSlotDragHandlers()
 // used to own those exclusively) — that exclusion meant a swipe starting
@@ -113,12 +117,32 @@ function setupBinderSwipe() {
       if (activeView) {
         const nextBtn = activeView.querySelector(".binder-nav-btn:last-of-type");
         const prevBtn = activeView.querySelector(".binder-nav-btn:first-of-type");
-        const btn = dx > 0 ? nextBtn : prevBtn;
+        const btn = dx > 0 ? prevBtn : nextBtn;
         if (btn && !btn.classList.contains("disabled")) btn.click();
       }
     }
     startX = null;
   });
+}
+
+// Strips currency symbols/thousands-separators before parsing a price,
+// rather than a bare Number(value) — found via a real, reported bug:
+// cells like "¥35" (yen symbol as literal text in the cell, not a
+// number-formatted cell) make Number("¥35") return NaN, and
+// JSON.stringify silently turns NaN into `null` in the request body
+// (there's no JSON representation for NaN). By the time the server
+// checks whether a purchase price is set, it looks exactly like there
+// isn't one — so a card with quantity=1 and a real price the person
+// typed in still fell back to "Wanted" status, with no error anywhere
+// in the chain to explain why. Returns null (not NaN) for anything that
+// still doesn't parse to a real number after stripping symbols, so this
+// failure mode can't happen again even from a differently-malformed cell.
+function parsePriceValue(raw) {
+  if (raw === null || raw === undefined || raw === "") return null;
+  const cleaned = String(raw).replace(/[^\d.-]/g, "");
+  if (cleaned === "" || cleaned === "-" || cleaned === ".") return null;
+  const num = Number(cleaned);
+  return Number.isFinite(num) ? num : null;
 }
 
 async function loadInventory() {
@@ -756,20 +780,31 @@ let imgPinchStartScale = 1;
 let imgPanAnchor = null; // {x, y, originX, originY} — set whenever exactly one pointer is down and scale > 1
 let imgLastTapAt = 0;
 
-function openImageViewer(url) {
+// Which record + which image (0 = primary, 1+ = additional photos) the
+// viewer currently has open — set by openImageViewer(), read by the
+// crop feature below to know what to save back over.
+let imgViewerRecordId = null;
+let imgViewerImageIndex = 0;
+
+function openImageViewer(url, recordId, imageIndex) {
   const modal = document.getElementById("image-viewer-modal");
   const img = document.getElementById("image-viewer-img");
   if (!modal || !img) return;
   img.src = url;
+  imgViewerRecordId = recordId ?? null;
+  imgViewerImageIndex = imageIndex ?? 0;
   imgZoom = { scale: 1, x: 0, y: 0 };
   applyImgZoom();
   attachImageViewerHandlers();
   modal.classList.add("open");
+  const cropBtn = document.getElementById("image-viewer-crop-btn");
+  if (cropBtn) cropBtn.style.display = imgViewerRecordId ? "flex" : "none";
   const hint = document.getElementById("image-viewer-hint");
   if (hint) { hint.style.opacity = "1"; setTimeout(() => { hint.style.opacity = "0"; }, 2200); }
 }
 
 function closeImageViewer() {
+  cancelCrop();
   const modal = document.getElementById("image-viewer-modal");
   if (modal) modal.classList.remove("open");
   const img = document.getElementById("image-viewer-img");
@@ -777,11 +812,223 @@ function closeImageViewer() {
   imgViewerPointers.clear();
   imgPinchStartDist = null;
   imgPanAnchor = null;
+  imgViewerRecordId = null;
 }
 
 function applyImgZoom() {
   const img = document.getElementById("image-viewer-img");
   if (img) img.style.transform = `translate(${imgZoom.x}px, ${imgZoom.y}px) scale(${imgZoom.scale})`;
+}
+
+// ---- Crop --------------------------------------------------------------
+// A drag-corners crop tool built directly into the image viewer above,
+// rather than a separate screen. Resets zoom to 1x on entry and disables
+// the viewer's own pointer handlers for the duration (see the
+// cropModeActive checks in attachImageViewerHandlers()) so pinch/pan
+// gestures can't fight the crop math, which assumes an unscaled image.
+let cropModeActive = false;
+let cropRect = null; // {x, y, w, h} in screen px, relative to the image's own rendered box (top-left origin)
+let cropDragMode = null; // null | "move" | "nw" | "ne" | "sw" | "se"
+let cropDragStart = null; // {x, y} pointer position when the current drag began
+let cropRectStart = null; // snapshot of cropRect at drag start, so deltas are computed from a fixed reference
+
+function enterCropMode() {
+  if (!imgViewerRecordId) return; // nothing to save back to — the crop button is hidden in this case anyway
+  cropModeActive = true;
+  imgZoom = { scale: 1, x: 0, y: 0 };
+  applyImgZoom();
+
+  const img = document.getElementById("image-viewer-img");
+  const imgRect = img.getBoundingClientRect();
+  const w = imgRect.width * 0.8;
+  const h = imgRect.height * 0.8;
+  cropRect = { x: (imgRect.width - w) / 2, y: (imgRect.height - h) / 2, w, h };
+
+  const cropBtn = document.getElementById("image-viewer-crop-btn");
+  if (cropBtn) cropBtn.style.display = "none";
+  const hint = document.getElementById("image-viewer-hint");
+  if (hint) hint.style.opacity = "0";
+  const toolbar = document.getElementById("crop-toolbar");
+  if (toolbar) toolbar.style.display = "flex";
+
+  attachCropHandlers();
+  renderCropOverlay();
+}
+
+function cancelCrop() {
+  cropModeActive = false;
+  cropRect = null;
+  cropDragMode = null;
+  cropRectStart = null;
+  const overlay = document.getElementById("crop-overlay");
+  if (overlay) { overlay.style.display = "none"; overlay.innerHTML = ""; }
+  const toolbar = document.getElementById("crop-toolbar");
+  if (toolbar) toolbar.style.display = "none";
+  const cropBtn = document.getElementById("image-viewer-crop-btn");
+  if (cropBtn && imgViewerRecordId) cropBtn.style.display = "flex";
+}
+
+// Rebuilt on every drag-move for live visual feedback — cheap enough at
+// this scale (a handful of divs), and simpler than hand-patching
+// individual element styles. Event listeners survive this because
+// they're attached once to the stable #crop-overlay container itself
+// (see attachCropHandlers()), not to the rect/handles that get
+// recreated here — delegation, not direct binding.
+function renderCropOverlay() {
+  const img = document.getElementById("image-viewer-img");
+  const overlay = document.getElementById("crop-overlay");
+  if (!img || !overlay || !cropRect) return;
+  const imgRect = img.getBoundingClientRect();
+  overlay.style.display = "block";
+  overlay.style.top = imgRect.top + "px";
+  overlay.style.left = imgRect.left + "px";
+  overlay.style.width = imgRect.width + "px";
+  overlay.style.height = imgRect.height + "px";
+
+  const { x, y, w, h } = cropRect;
+  const right = Math.max(0, imgRect.width - (x + w));
+  const bottom = Math.max(0, imgRect.height - (y + h));
+
+  overlay.innerHTML = `
+    <div class="crop-mask" style="top:0; left:0; right:0; height:${Math.max(0, y)}px;"></div>
+    <div class="crop-mask" style="top:${y + h}px; left:0; right:0; height:${bottom}px;"></div>
+    <div class="crop-mask" style="top:${y}px; left:0; width:${Math.max(0, x)}px; height:${h}px;"></div>
+    <div class="crop-mask" style="top:${y}px; right:0; width:${right}px; height:${h}px;"></div>
+    <div class="crop-rect" id="crop-rect" style="left:${x}px; top:${y}px; width:${w}px; height:${h}px;">
+      <div class="crop-handle nw" data-handle="nw"></div>
+      <div class="crop-handle ne" data-handle="ne"></div>
+      <div class="crop-handle sw" data-handle="sw"></div>
+      <div class="crop-handle se" data-handle="se"></div>
+    </div>
+  `;
+}
+
+// Delegated on the stable #crop-overlay container (wired once — see the
+// dataset guard) rather than on the rect/handles directly, since those
+// get recreated on every renderCropOverlay() call during a drag and
+// would lose any listeners attached straight to them. Pointer capture
+// is likewise set on the overlay itself, not the specific element that
+// was pressed, for the same reason — a captured element that gets
+// removed from the DOM mid-gesture would silently end the capture.
+function attachCropHandlers() {
+  const overlay = document.getElementById("crop-overlay");
+  if (!overlay || overlay.dataset.wired) return;
+  overlay.dataset.wired = "1";
+
+  overlay.addEventListener("pointerdown", (e) => {
+    const handle = e.target.closest(".crop-handle");
+    const rect = e.target.closest(".crop-rect");
+    if (!handle && !rect) return;
+    overlay.setPointerCapture(e.pointerId);
+    cropDragMode = handle ? handle.dataset.handle : "move";
+    cropDragStart = { x: e.clientX, y: e.clientY };
+    cropRectStart = { ...cropRect };
+  });
+
+  overlay.addEventListener("pointermove", (e) => {
+    if (!cropDragMode || !cropRectStart) return;
+    const img = document.getElementById("image-viewer-img");
+    const imgRect = img.getBoundingClientRect();
+    const dx = e.clientX - cropDragStart.x;
+    const dy = e.clientY - cropDragStart.y;
+    const MIN = 40; // smallest allowed crop dimension, in screen px
+
+    let { x, y, w, h } = cropRectStart;
+    if (cropDragMode === "move") {
+      x = Math.max(0, Math.min(imgRect.width - w, cropRectStart.x + dx));
+      y = Math.max(0, Math.min(imgRect.height - h, cropRectStart.y + dy));
+    } else {
+      // Resize from whichever corner — clamped so it can't invert,
+      // shrink below MIN, or drag past the image's own edges.
+      if (cropDragMode.includes("w")) {
+        const newX = Math.max(0, Math.min(cropRectStart.x + cropRectStart.w - MIN, cropRectStart.x + dx));
+        w = cropRectStart.w + (cropRectStart.x - newX);
+        x = newX;
+      }
+      if (cropDragMode.includes("e")) {
+        w = Math.max(MIN, Math.min(imgRect.width - cropRectStart.x, cropRectStart.w + dx));
+      }
+      if (cropDragMode.includes("n")) {
+        const newY = Math.max(0, Math.min(cropRectStart.y + cropRectStart.h - MIN, cropRectStart.y + dy));
+        h = cropRectStart.h + (cropRectStart.y - newY);
+        y = newY;
+      }
+      if (cropDragMode.includes("s")) {
+        h = Math.max(MIN, Math.min(imgRect.height - cropRectStart.y, cropRectStart.h + dy));
+      }
+    }
+    cropRect = { x, y, w, h };
+    renderCropOverlay();
+  });
+
+  const endCropDrag = () => { cropDragMode = null; cropRectStart = null; };
+  overlay.addEventListener("pointerup", endCropDrag);
+  overlay.addEventListener("pointercancel", endCropDrag);
+}
+
+// Draws the selected screen-pixel rectangle onto an offscreen canvas at
+// the image's NATURAL resolution (not its scaled-down on-screen size),
+// uploads the result via upload-card-image.js (same endpoint the Add
+// Card screen's own "Upload"/"Camera" buttons use), and replaces
+// whichever image slot (primary or a specific additional photo) was
+// open in imageBlobKeys — a fresh blobKey, not overwriting the old one
+// in place, matching uniqueImageId()'s own reasoning above (an
+// overwritten key would fight the CDN's "cache forever" header on
+// anything that already requested the old bytes).
+async function saveCrop() {
+  if (!cropRect || !imgViewerRecordId) return;
+  const recordId = imgViewerRecordId;
+  const imageIndex = imgViewerImageIndex;
+  const img = document.getElementById("image-viewer-img");
+  const imgRect = img.getBoundingClientRect();
+
+  const scaleX = img.naturalWidth / imgRect.width;
+  const scaleY = img.naturalHeight / imgRect.height;
+  const sx = cropRect.x * scaleX;
+  const sy = cropRect.y * scaleY;
+  const sw = cropRect.w * scaleX;
+  const sh = cropRect.h * scaleY;
+
+  const record = inventoryRecords.find((r) => r.id === recordId);
+  if (!record) { showToast("Couldn't find that card anymore."); return; }
+
+  const hint = document.getElementById("image-viewer-hint");
+  if (hint) { hint.style.opacity = "1"; hint.textContent = "Saving crop…"; }
+
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(sw));
+    canvas.height = Math.max(1, Math.round(sh));
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
+    const base64 = dataUrl.split(",")[1];
+
+    const tempId = uniqueImageId(record.cardNumber);
+    const uploadData = await apiJson(`${API_BASE}/upload-card-image`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ imageBase64: base64, contentType: "image/jpeg", cardId: `${tempId}-crop` }),
+    });
+
+    const existingKeys = record.imageBlobKeys || (record.imageBlobKey ? [record.imageBlobKey] : []);
+    const newKeys = [...existingKeys];
+    newKeys[imageIndex] = uploadData.blobKey;
+
+    await apiJson(`${API_BASE}/inventory-save`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...record, imageBlobKeys: newKeys, imageBlobKey: newKeys[0] }),
+    });
+
+    await refreshAll();
+    closeImageViewer();
+    showPriceBreakdownFor(recordId, currentDetailBinderKey);
+    showToast("Photo cropped and saved.");
+  } catch (err) {
+    showToast("Couldn't save crop: " + err.message);
+    if (hint) hint.textContent = "";
+  }
 }
 
 function attachImageViewerHandlers() {
@@ -790,6 +1037,7 @@ function attachImageViewerHandlers() {
   img.dataset.zoomWired = "1";
 
   img.addEventListener("pointerdown", (e) => {
+    if (cropModeActive) return; // crop rect/handles own gestures while cropping — see enterCropMode()
     img.setPointerCapture(e.pointerId);
     imgViewerPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
@@ -960,7 +1208,7 @@ async function submitClone() {
   const clone = {
     ...record,
     quantity: priceRaw ? 1 : 0,
-    purchasePrice: priceRaw ? Number(priceRaw) : null,
+    purchasePrice: priceRaw ? parsePriceValue(priceRaw) : null,
     purchaseCurrency: priceRaw ? currency : null,
     purchaseDate: priceRaw ? new Date().toISOString().slice(0, 10) : null,
     collection: collectionRaw ? collectionRaw.split("+").map((s) => s.trim()).filter(Boolean) : [],
@@ -1209,7 +1457,7 @@ function showPriceBreakdownFor(recordId, binderKey) {
   if (imageUrls.length >= 1) {
     galleryEl.style.display = "flex";
     galleryEl.innerHTML = imageUrls.map((url, i) => `
-      <img src="${escapeAttr(url)}" alt="Photo ${i + 1}" onclick="openImageViewer('${escapeAttr(url)}')" style="width:80px; height:112px; object-fit:cover; border-radius:8px; border:1px solid var(--line); flex:0 0 auto; cursor:pointer;">
+      <img src="${escapeAttr(url)}" alt="Photo ${i + 1}" onclick="openImageViewer('${escapeAttr(url)}', '${escapeAttr(record.id)}', ${i})" style="width:80px; height:112px; object-fit:cover; border-radius:8px; border:1px solid var(--line); flex:0 0 auto; cursor:pointer;">
     `).join("");
   } else {
     galleryEl.style.display = "none";
@@ -1467,7 +1715,7 @@ async function saveDetailEdit() {
     gradingCompany: conditionType === "Slabs" ? (valueOf("pm-edit-grading-company") || null) : null,
     certNumber: conditionType === "Slabs" ? (valueOf("pm-edit-cert-number") || null) : null,
     subCondition: valueOf("pm-edit-sub-condition") || null,
-    purchasePrice: purchasePriceRaw ? Number(purchasePriceRaw) : null,
+    purchasePrice: purchasePriceRaw ? parsePriceValue(purchasePriceRaw) : null,
     purchaseCurrency: valueOf("pm-edit-purchase-currency") || "JPY",
     purchaseDate: valueOf("pm-edit-purchase-date") || null,
     toretokuUrl: toretokuUrl ? normalizeUrl(toretokuUrl) : null,
@@ -1708,7 +1956,7 @@ function exportInventoryTemplate() {
     showToast("No cards in inventory yet to export.");
     return;
   }
-  const headers = IMPORT_COLUMN_MAP.map(([col]) => col);
+  const headers = [...IMPORT_COLUMN_MAP.map(([col]) => col), "Stored Image URLs"];
   const rows = inventoryRecords.map((r) => {
     const row = {};
     IMPORT_COLUMN_MAP.forEach(([col, field]) => {
@@ -1722,6 +1970,14 @@ function exportInventoryTemplate() {
       }
       row[col] = value;
     });
+    // Pure reference, not re-importable — a separate column from "Image
+    // Link"/"Additional Photos" on purpose. Those two keep their import
+    // meaning (a link to fetch), so showing the ALREADY-stored blob URL
+    // there instead would mean re-importing an unedited export re-fetches
+    // every image into a brand new duplicate blob, every time. This
+    // column is just for looking up or reusing where an image actually
+    // lives right now; nothing reads it back in on import.
+    row["Stored Image URLs"] = imageUrlsFor(r).join(" + ");
     return row;
   });
 
@@ -1737,6 +1993,7 @@ function exportInventoryTemplate() {
     ["Color / Family Type / Collection", "Multiple values are joined with ' + '."],
     ["Additional Photos", "Always blank on export — only a stored photo's blob survives, not its original link. Leave blank on re-import too; it won't remove any existing photos."],
     ["Binder Placement", "\"<Binder Name> <Number>\" — reflects where this card is placed right now. Editing it and re-importing moves the card (or creates a new binder if the name doesn't exist); leaving it as-is on re-import keeps it exactly where it is."],
+    ["Stored Image URLs", "Reference only, not read back in on re-import — every image currently stored for this card (primary + additional), '+'-joined. Direct links to what's actually saved, regardless of whether it came from a scrape, a pasted Image Link, or Additional Photos."],
   ];
   const legendSheet = XLSX.utils.aoa_to_sheet(legendRows);
   legendSheet["!cols"] = [{ wch: 30 }, { wch: 95 }];
@@ -1820,15 +2077,23 @@ async function handleImportFile(input) {
       }
     }
 
-    const records = rows
-      .filter((row) => String(row["Card Name"] || "").trim() && String(row["Card Number"] || "").trim())
+    // Card Number is no longer required to import a row — only Card
+    // Name is (some cards, e.g. move/attack-style cards, genuinely have
+    // no collector number). This used to silently drop any row missing
+    // EITHER field with no feedback at all — worth tracking now so a
+    // row that's missing what it actually needs still shows up in the
+    // import summary instead of vanishing without explanation.
+    const rowsWithName = rows.filter((row) => String(row["Card Name"] || "").trim());
+    const skippedNoName = rows.length - rowsWithName.length;
+
+    const records = rowsWithName
       .map((row) => {
         const rec = {};
         IMPORT_COLUMN_MAP.forEach(([col, field]) => {
           let value = row[col];
           if (value === "" || value === undefined) value = undefined;
           if (field === "quantity") value = value === undefined ? 0 : Number(value);
-          if (field === "purchasePrice") value = value === undefined || value === "" ? null : Number(value);
+          if (field === "purchasePrice") value = parsePriceValue(value);
           if (field === "purchaseDate" && value instanceof Date) {
             value = value.toISOString().slice(0, 10);
           }
@@ -1853,7 +2118,7 @@ async function handleImportFile(input) {
       if (statusEl) {
         statusEl.textContent = idsToDelete.length
           ? `Deleted ${deletedCount} card(s).` + (deleteFailures ? ` ${deleteFailures} couldn't be deleted (already gone?).` : "")
-          : "No valid rows found (need at least Card Name + Card Number, or a Listing UID marked for deletion).";
+          : "No valid rows found (need at least a Card Name, or a Listing UID marked for deletion).";
       }
       if (idsToDelete.length) await refreshAll();
       return;
@@ -1983,6 +2248,8 @@ async function handleImportFile(input) {
     if (statusEl) {
       let summary = `Imported ${data.saved.length} card(s). Total inventory: ${data.count}.`;
       if (idsToDelete.length) summary += ` Deleted ${deletedCount} card(s).` + (deleteFailures ? ` ${deleteFailures} couldn't be deleted (already gone?).` : "");
+      if (skippedNoName) summary += ` ${skippedNoName} row${skippedNoName === 1 ? "" : "s"} skipped — no Card Name.`;
+      if (data.skipped && data.skipped.length) summary += ` ${data.skipped.length} row${data.skipped.length === 1 ? "" : "s"} rejected by the server (${data.skipped.map((s) => s.error).join("; ")}).`;
       if (imageFailures) summary += ` (${imageFailures} image link${imageFailures === 1 ? "" : "s"} couldn't be fetched — check the URLs and retry those cards.)`;
       if (placementFailures.conflict) summary += ` ${placementFailures.conflict} Binder Placement${placementFailures.conflict === 1 ? "" : "s"} skipped — that slot was already taken.`;
       if (placementFailures.unparsed) summary += ` ${placementFailures.unparsed} Binder Placement${placementFailures.unparsed === 1 ? "" : "s"} couldn't be read — expected "<Binder Name> <Number>".`;
@@ -2259,8 +2526,8 @@ async function saveCard() {
 
   const cardName = document.getElementById("add-card-name").value.trim();
   const cardNumber = document.getElementById("add-card-number").value.trim();
-  if (!cardName || !cardNumber) {
-    setStatus("Card name and card number are required.");
+  if (!cardName) {
+    setStatus("Card name is required.");
     return;
   }
 
@@ -2287,7 +2554,7 @@ async function saveCard() {
     toretokuUrl: getAddCardUrl("toretoku"),
     yuyuteiUrl: getAddCardUrl("yuyutei"),
     imageLink: valueOf("add-image-link"),
-    purchasePrice: purchasePriceRaw ? Number(purchasePriceRaw) : null,
+    purchasePrice: purchasePriceRaw ? parsePriceValue(purchasePriceRaw) : null,
     purchaseCurrency,
     purchaseDate: new Date().toISOString().slice(0, 10),
     quantity: purchasePriceRaw ? (received ? 1 : 0) : 0,
@@ -3174,8 +3441,9 @@ function closePurchaseModal() {
 async function resolvePurchase(newStatus) {
   const price = document.getElementById("purchase-price-input").value.trim();
   const currency = document.getElementById("purchase-currency-input").value.trim() || "SGD";
-  if (!price) {
-    showToast("Enter a purchase price first — Wanted cards need one to move status.");
+  const parsedPrice = parsePriceValue(price);
+  if (!price || parsedPrice == null) {
+    showToast("Enter a valid purchase price first — Wanted cards need one to move status.");
     return;
   }
   const record = inventoryRecords.find((r) => r.id === purchaseCardId);
@@ -3187,7 +3455,7 @@ async function resolvePurchase(newStatus) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         ...record,
-        purchasePrice: Number(price),
+        purchasePrice: parsedPrice,
         purchaseCurrency: currency,
         purchaseDate: new Date().toISOString().slice(0, 10),
         quantity: newStatus === "purchased" ? 1 : 0,

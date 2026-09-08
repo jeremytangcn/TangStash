@@ -255,9 +255,15 @@
      row no matter what overflow-y said. Fixed positioning escapes that
      ancestor entirely (nothing here sets transform/filter/etc. on an
      ancestor to create a containing block for fixed elements), so
-     top/left are set in JS instead of CSS — see toggleFilterMenu(). */
+     top/left are set in JS instead of CSS — see toggleFilterMenu().
+     z-index:45, not 30 — .bottom-nav is z-index:40 (fixed, always on
+     screen), which outranked the dropdown's old z-index:30 whenever the
+     dropdown's max-height:220px reached down far enough to overlap the
+     nav bar, hiding it again despite the position:fixed fix above. Kept
+     below every actual modal (50+) on purpose — a dropdown shouldn't
+     out-rank a modal if one somehow ends up open at the same time. */
   .filter-dropdown{
-    display:none; position:fixed; z-index:30;
+    display:none; position:fixed; z-index:45;
     background: var(--ink-3); border:1px solid var(--line); border-radius:12px;
     padding:6px; min-width:150px; max-height:220px; overflow-y:auto;
     box-shadow: 0 12px 30px rgba(0,0,0,0.45);
@@ -693,6 +699,31 @@
     position:absolute; bottom:22px; left:0; right:0; text-align:center;
     font-family:var(--mono); font-size:10.5px; color:var(--text-faint);
     letter-spacing:0.04em; pointer-events:none; transition:opacity 0.3s;
+  }
+  /* Crop mode: #crop-overlay is positioned exactly over the rendered
+     <img> (computed in JS from its getBoundingClientRect(), since the
+     image's on-screen size/position depends on its own aspect ratio and
+     the viewport) and holds the 4 dimming strips + the crop rectangle
+     itself + its 4 corner handles, all built dynamically — see
+     enterCropMode()/renderCropOverlay() in app.js. */
+  #crop-overlay{ position:fixed; z-index:3; pointer-events:none; }
+  .crop-mask{ position:absolute; background: rgba(4,6,10,0.75); }
+  .crop-rect{
+    position:absolute; border: 2px solid var(--gold);
+    pointer-events:auto; cursor:grab; touch-action:none;
+  }
+  .crop-handle{
+    position:absolute; width:22px; height:22px; margin:-11px;
+    background: var(--gold); border-radius:50%; border:2px solid #1a1300;
+    pointer-events:auto; touch-action:none;
+  }
+  .crop-handle.nw{ top:0; left:0; cursor:nwse-resize; }
+  .crop-handle.ne{ top:0; left:100%; cursor:nesw-resize; }
+  .crop-handle.sw{ top:100%; left:0; cursor:nesw-resize; }
+  .crop-handle.se{ top:100%; left:100%; cursor:nwse-resize; }
+  #crop-toolbar{
+    position:absolute; bottom:22px; left:22px; right:22px;
+    display:flex; gap:10px; z-index:3;
   }
   .modal-sheet{
     width:100%; background: var(--ink-2); border:1px solid var(--line);
@@ -1349,9 +1380,15 @@
          the viewer by accident mid-gesture.
     -->
     <div class="image-viewer-backdrop" id="image-viewer-modal" onpointerdown="armBackdropDismiss(event)" onclick="dismissBackdropIfArmed(event, closeImageViewer)">
+      <div class="modal-close" id="image-viewer-crop-btn" style="position:absolute; top:16px; right:64px; z-index:2; display:none;" onclick="enterCropMode()" title="Crop this photo">✂</div>
       <div class="modal-close" style="position:absolute; top:16px; right:16px; z-index:2;" onclick="closeImageViewer()">✕</div>
       <div class="image-viewer-hint" id="image-viewer-hint">Pinch to zoom · double-tap to reset</div>
       <img id="image-viewer-img" src="" alt="" draggable="false">
+      <div id="crop-overlay" style="display:none;"></div>
+      <div id="crop-toolbar" style="display:none;">
+        <button class="fetch-btn" style="flex:1; background:var(--ink-3); color:var(--text);" onclick="cancelCrop()">Cancel</button>
+        <button class="fetch-btn" style="flex:1;" onclick="saveCrop()">Save Crop</button>
+      </div>
     </div>
   </div>
 

@@ -78,7 +78,18 @@ exports.handler = async (event) => {
   }
 
   try {
-    const imgRes = await fetch(imageUrl, { headers: imageFetchHeaders() });
+    // Referer set to the image's own origin — a generic, best-effort
+    // guess for arbitrary user-pasted links (unlike store-card-image.js,
+    // there's no fixed handful of known hosts to look up a specific
+    // Referer for here). This is the exact failure mode
+    // imageFetchHeaders()'s own docs describe: no Referer at all reads
+    // as hotlink abuse to a lot of CDN/bucket-hosted image setups (S3
+    // buckets serving a marketplace's product images are a common
+    // example), which reject the request outright even though the
+    // image is genuinely public. Same-origin is what most such checks
+    // actually verify, so it doesn't need to be the literal referring
+    // page — just the right domain.
+    const imgRes = await fetch(imageUrl, { headers: imageFetchHeaders(parsed.origin + "/") });
     if (!imgRes.ok) {
       return respond(502, { error: `Couldn't fetch that image (upstream returned ${imgRes.status})` });
     }
