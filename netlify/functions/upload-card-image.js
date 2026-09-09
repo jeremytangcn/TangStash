@@ -25,7 +25,7 @@ const STORE_NAME = "card-images";
 // lower than store-card-image.js's 8MB since that one downloads directly
 // server-side and never round-trips through a base64 JSON body.
 const MAX_BYTES = 4 * 1024 * 1024; // 4MB raw (~5.3MB once base64-encoded)
-const ALLOWED_CONTENT_TYPES = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
+const ALLOWED_CONTENT_TYPES = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif", "image/gif"];
 
 exports.handler = async (event) => {
   // Required for Netlify Blobs in classic ("Lambda compatibility mode")

@@ -78,6 +78,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   renderAutoBinders();
   renderCustomBinderSwitcher();
   setupBinderSwipe();
+  resetGoodsAddForm(); // just to pre-fill Purchase Date with today — no data loaded/lost, Goods loads lazily on first switch into that mode (see switchAppMode)
 });
 
 // Swipe support (pointer events cover touch + mouse drag) for whichever
@@ -582,7 +583,7 @@ function renderInventoryGroup(group) {
 
   return `
     <div class="inv-group-wrap" style="margin:0 22px 10px;">
-      <div class="inv-item inv-group-header" onclick="toggleInventoryGroup('${escapeAttr(groupKey)}')">
+      <div class="inv-item inv-group-header" data-group-key="${escapeAttr(groupKey)}" onclick="toggleInventoryGroup(this.dataset.groupKey)">
         <div class="inv-thumb">${thumbInner}<span class="inv-group-count-badge">×${group.length}</span></div>
         <div class="inv-mid">
           <div class="inv-name">${escapeHtml(group[0].cardName)}</div>
@@ -742,6 +743,133 @@ function attachSwipeHandlers(contentEl) {
   contentEl.addEventListener("pointercancel", finish);
 }
 
+// ---- Goods: swipe-to-reveal (Clone/Delete) ----------------------------------
+// Duplicated from TCG's attachSwipeHandlers()/closeSwipeRow()/
+// handleInventoryRowClick() above rather than made generic and shared —
+// same "separate but parallel" reasoning as everywhere else in Goods:
+// this exact mechanism took real debugging to get right earlier in this
+// project (a trailing "click" event after a swipe gesture was closing
+// what the swipe had just revealed), and duplicating proven, working
+// code carries far less risk than retrofitting genericity into it.
+// Own state (goodsOpenSwipeRowId, goodsSuppressRowClick) so a Goods row
+// being swiped open can never be confused with a TCG row's, even though
+// in practice only one mode's rows are ever visible at a time.
+let goodsOpenSwipeRowId = null;
+let goodsSuppressRowClick = false;
+
+// Scoped to a specific container (not a global query) — Inventory,
+// Pending, and Wanted all render independently within the same
+// refreshAllGoods() cycle, each calling this right after its own
+// render. A global query here would re-process elements from the
+// OTHER lists too on every call (they're not being re-rendered, so
+// their elements are the same DOM nodes each time), piling up
+// duplicate pointerdown/pointermove/pointerup listeners on them with
+// every refresh. Scoping to just the container that was actually just
+// rebuilt (whose elements are always fresh) avoids that entirely.
+function attachAllGoodsSwipeHandlers(containerId) {
+  document.querySelectorAll(`#${containerId} .swipe-content`).forEach((el) => attachGoodsSwipeHandlers(el));
+}
+
+function attachGoodsSwipeHandlers(contentEl) {
+  const rowId = contentEl.dataset.rowId;
+  let startX = null;
+  let startY = null;
+  let baseX = 0;
+  let axis = null;
+
+  contentEl.addEventListener("pointerdown", (e) => {
+    startX = e.clientX;
+    startY = e.clientY;
+    baseX = contentEl.dataset.openState === "left" ? SWIPE_ACTION_WIDTH : contentEl.dataset.openState === "right" ? -SWIPE_ACTION_WIDTH : 0;
+    axis = null;
+    contentEl.style.transition = "none";
+  });
+
+  contentEl.addEventListener("pointermove", (e) => {
+    if (startX === null) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    if (axis === null) {
+      if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
+      axis = Math.abs(dx) > Math.abs(dy) ? "x" : "y";
+      if (axis === "x") {
+        contentEl.setPointerCapture(e.pointerId);
+        if (goodsOpenSwipeRowId && goodsOpenSwipeRowId !== rowId) closeGoodsSwipeRow(goodsOpenSwipeRowId);
+      }
+    }
+    if (axis !== "x") return;
+    e.preventDefault();
+    const next = Math.max(-SWIPE_ACTION_WIDTH, Math.min(SWIPE_ACTION_WIDTH, baseX + dx));
+    contentEl.style.transform = `translateX(${next}px)`;
+  });
+
+  const finish = (e) => {
+    if (startX === null) return;
+    contentEl.style.transition = "transform 0.2s ease";
+    if (axis === "x") {
+      const dx = e.clientX - startX;
+      const settled = baseX + dx;
+      if (settled > SWIPE_ACTION_WIDTH / 2) {
+        contentEl.style.transform = `translateX(${SWIPE_ACTION_WIDTH}px)`;
+        contentEl.dataset.openState = "left";
+        goodsOpenSwipeRowId = rowId;
+      } else if (settled < -SWIPE_ACTION_WIDTH / 2) {
+        contentEl.style.transform = `translateX(-${SWIPE_ACTION_WIDTH}px)`;
+        contentEl.dataset.openState = "right";
+        goodsOpenSwipeRowId = rowId;
+      } else {
+        contentEl.style.transform = "translateX(0px)";
+        contentEl.dataset.openState = "";
+        if (goodsOpenSwipeRowId === rowId) goodsOpenSwipeRowId = null;
+      }
+      goodsSuppressRowClick = true;
+    }
+    startX = null;
+    startY = null;
+    axis = null;
+  };
+
+  contentEl.addEventListener("pointerup", finish);
+  contentEl.addEventListener("pointercancel", finish);
+}
+
+function closeGoodsSwipeRow(rowId) {
+  const el = document.querySelector(`.goods-swipeable-list .swipe-content[data-row-id="${rowId}"]`);
+  if (el) {
+    el.style.transition = "transform 0.2s ease";
+    el.style.transform = "translateX(0px)";
+    el.dataset.openState = "";
+  }
+  if (goodsOpenSwipeRowId === rowId) goodsOpenSwipeRowId = null;
+}
+
+function handleGoodsRowClick(id) {
+  if (goodsSuppressRowClick) {
+    goodsSuppressRowClick = false;
+    return;
+  }
+  if (goodsOpenSwipeRowId === id) {
+    closeGoodsSwipeRow(id);
+    return;
+  }
+  openGoodsDetail(id);
+}
+
+document.addEventListener("pointerdown", (e) => {
+  if (!goodsOpenSwipeRowId) return;
+  if (e.target.closest(`.goods-swipeable-list .swipe-content[data-row-id="${goodsOpenSwipeRowId}"]`)) return;
+  if (e.target.closest(".swipe-action")) return;
+  closeGoodsSwipeRow(goodsOpenSwipeRowId);
+});
+
+function confirmDeleteGoodsItem(recordId) {
+  const record = goodsRecords.find((r) => r.id === recordId);
+  if (!record) return;
+  const ok = window.confirm(`Delete "${record.name}"? This can't be undone.`);
+  if (ok) deleteGoodsItem(recordId);
+  else closeGoodsSwipeRow(recordId);
+}
+
 // ---- Modal backdrops: robust "tap outside to dismiss" ----------------------
 // A plain `onclick="if (event.target===this) close()"` on a backdrop
 // isn't enough for every modal in this app: the price-breakdown modal can
@@ -782,23 +910,37 @@ let imgLastTapAt = 0;
 
 // Which record + which image (0 = primary, 1+ = additional photos) the
 // viewer currently has open — set by openImageViewer(), read by the
-// crop feature below to know what to save back over.
+// crop feature below to know what to save back over. imgViewerCollection
+// ("tcg" | "goods") is what lets saveCrop() below work for both TCG and
+// Goods records with one shared viewer/crop implementation instead of
+// duplicating the whole pinch-zoom/pan/crop-drag machinery a second
+// time — that part is fully generic either way, only "which array do I
+// look this record up in, and which endpoint do I save it back to"
+// differs, so that's the only thing branched on.
 let imgViewerRecordId = null;
 let imgViewerImageIndex = 0;
+let imgViewerCollection = "tcg";
 
-function openImageViewer(url, recordId, imageIndex) {
+function openImageViewer(url, recordId, imageIndex, collection) {
   const modal = document.getElementById("image-viewer-modal");
   const img = document.getElementById("image-viewer-img");
   if (!modal || !img) return;
   img.src = url;
   imgViewerRecordId = recordId ?? null;
   imgViewerImageIndex = imageIndex ?? 0;
+  imgViewerCollection = collection || "tcg";
   imgZoom = { scale: 1, x: 0, y: 0 };
   applyImgZoom();
   attachImageViewerHandlers();
   modal.classList.add("open");
+  // GIFs can't be cropped — a crop redraws one frame onto a canvas,
+  // which flattens the animation into a single static image. Detected
+  // from the URL/blob key ending in ".gif" (how upload-card-image.js
+  // names a GIF blob) rather than the content-type, since that's not
+  // available here without an extra request just to check it.
+  const isGif = /\.gif(\?|$)/i.test(url);
   const cropBtn = document.getElementById("image-viewer-crop-btn");
-  if (cropBtn) cropBtn.style.display = imgViewerRecordId ? "flex" : "none";
+  if (cropBtn) cropBtn.style.display = (imgViewerRecordId && !isGif) ? "flex" : "none";
   const hint = document.getElementById("image-viewer-hint");
   if (hint) { hint.style.opacity = "1"; setTimeout(() => { hint.style.opacity = "0"; }, 2200); }
 }
@@ -813,6 +955,36 @@ function closeImageViewer() {
   imgPinchStartDist = null;
   imgPanAnchor = null;
   imgViewerRecordId = null;
+}
+
+// In-app viewer for Reference Link — opens the URL in an iframe instead
+// of a new browser tab/window. Some sites refuse to be embedded
+// (X-Frame-Options/CSP frame-ancestors) and there's no reliable way to
+// detect that from JS — the iframe's own load event fires regardless of
+// whether the embed actually succeeded — so "Open in browser" stays
+// visible in the header the whole time as a fallback, not just on
+// failure.
+function openLinkViewer(url) {
+  const modal = document.getElementById("link-viewer-modal");
+  const frame = document.getElementById("link-viewer-frame");
+  const urlEl = document.getElementById("link-viewer-url");
+  const externalLink = document.getElementById("link-viewer-external");
+  if (!modal || !frame) return;
+  frame.src = url;
+  if (urlEl) urlEl.textContent = url;
+  if (externalLink) externalLink.href = url;
+  modal.classList.add("open");
+}
+
+function closeLinkViewer() {
+  const modal = document.getElementById("link-viewer-modal");
+  const frame = document.getElementById("link-viewer-frame");
+  if (modal) modal.classList.remove("open");
+  // "about:blank", not "" — an empty src doesn't actually clear an
+  // iframe, it resolves (like any empty relative URL) to the page's
+  // OWN address, so this would otherwise silently reload the whole app
+  // a second time inside the now-hidden iframe every time this closes.
+  if (frame) frame.src = "about:blank";
 }
 
 function applyImgZoom() {
@@ -979,6 +1151,7 @@ async function saveCrop() {
   if (!cropRect || !imgViewerRecordId) return;
   const recordId = imgViewerRecordId;
   const imageIndex = imgViewerImageIndex;
+  const collection = imgViewerCollection;
   const img = document.getElementById("image-viewer-img");
   const imgRect = img.getBoundingClientRect();
 
@@ -989,8 +1162,9 @@ async function saveCrop() {
   const sw = cropRect.w * scaleX;
   const sh = cropRect.h * scaleY;
 
-  const record = inventoryRecords.find((r) => r.id === recordId);
-  if (!record) { showToast("Couldn't find that card anymore."); return; }
+  const records = collection === "goods" ? goodsRecords : inventoryRecords;
+  const record = records.find((r) => r.id === recordId);
+  if (!record) { showToast("Couldn't find that item anymore."); return; }
 
   const hint = document.getElementById("image-viewer-hint");
   if (hint) { hint.style.opacity = "1"; hint.textContent = "Saving crop…"; }
@@ -1004,7 +1178,7 @@ async function saveCrop() {
     const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
     const base64 = dataUrl.split(",")[1];
 
-    const tempId = uniqueImageId(record.cardNumber);
+    const tempId = uniqueImageId(collection === "goods" ? record.name : record.cardNumber);
     const uploadData = await apiJson(`${API_BASE}/upload-card-image`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1015,16 +1189,22 @@ async function saveCrop() {
     const newKeys = [...existingKeys];
     newKeys[imageIndex] = uploadData.blobKey;
 
-    await apiJson(`${API_BASE}/inventory-save`, {
+    const saveEndpoint = collection === "goods" ? "goods-save" : "inventory-save";
+    await apiJson(`${API_BASE}/${saveEndpoint}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...record, imageBlobKeys: newKeys, imageBlobKey: newKeys[0] }),
     });
 
-    await refreshAll();
     closeImageViewer();
-    showPriceBreakdownFor(recordId, currentDetailBinderKey);
     showToast("Photo cropped and saved.");
+    if (collection === "goods") {
+      await refreshAllGoods();
+      openGoodsDetail(recordId);
+    } else {
+      await refreshAll();
+      showPriceBreakdownFor(recordId, currentDetailBinderKey);
+    }
   } catch (err) {
     showToast("Couldn't save crop: " + err.message);
     if (hint) hint.textContent = "";
@@ -3600,6 +3780,1306 @@ function showScreen(name) {
     item.classList.toggle("active", item.dataset.screen === name);
   });
   window.scrollTo({ top: 0, behavior: "instant" in window ? "instant" : "auto" });
+}
+
+// ---- Goods mode -------------------------------------------------------------
+// A second, simpler mode alongside TCG — separate data (goods-*.js
+// functions, a completely different blob key so there's no code path
+// that could ever mix Goods and TCG records), separate top-level
+// screens (.goods-screen, not .screen — kept as a genuinely different
+// class, not just a modifier, so TCG's own showScreen() and its
+// document.querySelectorAll(".screen") never interact with these
+// screens at all, and vice versa). Same app-shell, modal-layer, image
+// viewer (zoom/crop), and other shared helpers as TCG — just a
+// different set of screens and its own nav.
+//
+// Phase 1: mode switching, nav, and basic list/dashboard rendering only
+// — no Add form yet (stubbed), no filters, no tile view rendering, no
+// xlsx import/export. Those are follow-up passes on top of this
+// foundation.
+let appMode = "tcg";
+let goodsRecords = [];
+let goodsSearchTerm = "";
+let goodsViewMode = "list"; // "list" | "tile" — tile rendering comes in a later pass
+
+function switchAppMode(mode) {
+  appMode = mode;
+  document.getElementById("tcg-app").style.display = mode === "tcg" ? "block" : "none";
+  document.getElementById("goods-app").style.display = mode === "goods" ? "block" : "none";
+  if (mode === "goods") {
+    showGoodsScreen("dashboard");
+    refreshAllGoods();
+  } else {
+    showScreen("dashboard");
+  }
+}
+
+function showGoodsScreen(name) {
+  document.querySelectorAll(".goods-screen").forEach((s) => s.classList.remove("active"));
+  document.getElementById("goods-screen-" + name).classList.add("active");
+  document.querySelectorAll(".nav-item[data-goods-screen]").forEach((item) => {
+    item.classList.toggle("active", item.dataset.goodsScreen === name);
+  });
+  window.scrollTo({ top: 0, behavior: "instant" in window ? "instant" : "auto" });
+}
+
+// Loaded lazily on first switch into Goods mode (see switchAppMode),
+// not on initial page boot — most sessions likely stay in one mode the
+// whole time, so there's no reason to fetch Goods data before anyone's
+// actually asked to see it.
+async function loadGoodsInventory() {
+  try {
+    const data = await apiJson(`${API_BASE}/goods-list`);
+    goodsRecords = data.records || [];
+  } catch (err) {
+    goodsRecords = [];
+    console.error("Failed to load goods:", err);
+  }
+}
+
+async function refreshAllGoods() {
+  const icon = document.getElementById("goods-refresh-icon");
+  if (icon) icon.parentElement.classList.add("spinning");
+  await loadGoodsInventory();
+  renderGoodsDashboard();
+  rebuildGoodsDynamicFilterOptions();
+  renderGoodsInventory();
+  renderGoodsStatusList("Pending Delivery", "goods-pending-list");
+  renderGoodsStatusList("Wanted", "goods-wanted-list");
+  if (icon) icon.parentElement.classList.remove("spinning");
+}
+
+// Shared core for Inventory/Pending/Wanted's list rendering — groups
+// the given records by Name, then renders as either a swipeable list
+// (renderGoodsGroup/renderGoodsRow) or a tile grid
+// (renderGoodsGroupTile/renderGoodsTile), whichever goodsViewMode
+// currently is. All three screens use the SAME view-mode toggle rather
+// than each having its own, so switching to Tile on one carries over
+// to the others — a single "how I want to browse Goods" preference,
+// not three independently-set ones.
+function renderGoodsList(records, containerId, emptyMessage) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  if (records.length === 0) {
+    container.innerHTML = `<div class="inv-loading" style="margin:0 22px 14px;">${emptyMessage}</div>`;
+    return;
+  }
+
+  const groups = new Map();
+  records.forEach((r) => {
+    const key = goodsGroupKey(r);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(r);
+  });
+
+  if (goodsViewMode === "tile") {
+    container.innerHTML = `<div class="goods-tile-grid">` + [...groups.values()].map((group) =>
+      group.length > 1 ? renderGoodsGroupTile(group) : renderGoodsTile(group[0])
+    ).join("") + `</div>`;
+    return;
+  }
+
+  container.innerHTML = [...groups.values()].map((group) =>
+    group.length > 1 ? renderGoodsGroup(group) : renderGoodsRow(group[0])
+  ).join("");
+  attachAllGoodsSwipeHandlers(containerId);
+}
+
+// Backs both the Pending and Wanted nav screens — a fixed-status view
+// of the same renderGoodsList() core Inventory uses, so a group of
+// same-Name items behaves identically here: count badge, expand/
+// collapse, swipe-to-clone/delete, tap for full detail, and now List/
+// Tile too. No search or Product Type/Source/Series filters — status
+// is the one axis these two screens exist to fix, everything else
+// stays on Inventory.
+function renderGoodsStatusList(status, containerId) {
+  const filtered = goodsRecords.filter((r) => r.status === status);
+  renderGoodsList(filtered, containerId, "Nothing here yet.");
+}
+
+// ---- Goods: item detail/edit view -------------------------------------------
+// Mirrors TCG's showPriceBreakdownFor()/toggleDetailEdit() structure —
+// same gallery + details-grid + pencil-to-edit pattern — but simpler:
+// no Market Price/source rows (Goods has no market pricing at all), and
+// every field is editable (no "except binder placement" carve-out,
+// since Goods has no binder concept to place things into).
+let currentGoodsDetailId = null;
+let goodsEditExtraPhotos = [];
+
+function openGoodsDetail(id) {
+  const record = goodsRecords.find((r) => r.id === id);
+  if (!record) return;
+  currentGoodsDetailId = id;
+  cancelGoodsDetailEdit(); // in case a previous item was left mid-edit
+
+  document.getElementById("gd-title").textContent = record.name;
+  const statusBadge = document.getElementById("gd-status-badge");
+  statusBadge.textContent = record.status;
+  statusBadge.className = "pm-status-badge" + (record.status === "Pending Delivery" ? " pending" : record.status === "Wanted" ? " wanted" : "");
+
+  const galleryEl = document.getElementById("gd-gallery");
+  const imageUrls = imageUrlsFor(record);
+  if (imageUrls.length >= 1) {
+    galleryEl.style.display = "flex";
+    galleryEl.innerHTML = imageUrls.map((url, i) => `
+      <img src="${escapeAttr(url)}" alt="Photo ${i + 1}" onclick="openImageViewer('${escapeAttr(url)}', '${escapeAttr(record.id)}', ${i}, 'goods')" style="width:80px; height:80px; object-fit:cover; border-radius:8px; border:1px solid var(--line); flex:0 0 auto; cursor:pointer;">
+    `).join("");
+  } else {
+    galleryEl.style.display = "none";
+    galleryEl.innerHTML = "";
+  }
+
+  const detailItems = [];
+  const addDetail = (label, value, span2) => {
+    if (value == null || value === "") return;
+    detailItems.push(`<div class="pm-detail-item${span2 ? " span-2" : ""}"><div class="pm-detail-label">${escapeHtml(label)}</div><div class="pm-detail-value">${escapeHtml(value)}</div></div>`);
+  };
+  addDetail("Sub-name", record.subName);
+  addDetail("Brand", record.brand);
+  addDetail("Product Type", record.productType);
+  addDetail("Series / Franchise", record.seriesFranchise);
+  addDetail("Source", record.source);
+  addDetail("Set Type", record.setType);
+  addDetail("Quantity", record.quantity);
+  addDetail("Purchase Date", record.purchaseDate);
+  addDetail("Remarks", record.remarks, true);
+  if (record.referenceLink) {
+    detailItems.push(`<div class="pm-detail-item span-2"><div class="pm-detail-label">Reference</div><div class="pm-detail-value"><a href="#" onclick="event.preventDefault(); openLinkViewer('${escapeAttr(record.referenceLink)}');" style="color:var(--teal);">${escapeHtml(record.referenceLink)}</a></div></div>`);
+  }
+  document.getElementById("gd-details").innerHTML = detailItems.join("");
+
+  const priceRowEl = document.getElementById("gd-price-row");
+  priceRowEl.innerHTML = record.purchasePrice != null
+    ? `<div class="pm-average-row purchase">
+        <div class="pm-average-label">Purchase Price</div>
+        <div class="pm-average-value">${escapeHtml(formatOriginal(record.purchasePrice, record.purchaseCurrency || "SGD"))}</div>
+      </div>`
+    : `<div class="modal-footnote">No purchase price recorded yet — this item is on the wishlist.</div>`;
+
+  document.getElementById("goods-detail-modal").classList.add("open");
+}
+
+function closeGoodsDetail() {
+  document.getElementById("goods-detail-modal").classList.remove("open");
+  currentGoodsDetailId = null;
+}
+
+function toggleGoodsDetailEdit() {
+  const formEl = document.getElementById("gd-edit-form");
+  const gridEl = document.getElementById("gd-details");
+  if (!formEl || !gridEl) return;
+
+  if (formEl.style.display !== "none") {
+    cancelGoodsDetailEdit();
+    return;
+  }
+
+  const record = goodsRecords.find((r) => r.id === currentGoodsDetailId);
+  if (!record) return;
+
+  goodsEditExtraPhotos = [];
+  const existingExtraUrls = imageUrlsFor(record).slice(1);
+  const opt = (value, current) => `<option value="${escapeAttr(value)}"${value === (current || "") ? " selected" : ""}>${escapeHtml(value)}</option>`;
+
+  formEl.innerHTML = `
+    <div class="field-label" style="padding:0; margin-top:0;">Name</div>
+    <input class="form-input" id="gd-edit-name" value="${escapeAttr(record.name || "")}" style="margin-bottom:10px;">
+    <div class="field-label" style="padding:0;">Sub-name</div>
+    <input class="form-input" id="gd-edit-sub-name" value="${escapeAttr(record.subName || "")}" style="margin-bottom:10px;">
+    <div class="field-label" style="padding:0;">Brand</div>
+    <input class="form-input" id="gd-edit-brand" value="${escapeAttr(record.brand || "")}" style="margin-bottom:10px;">
+    <div class="form-row" style="margin-bottom:10px;">
+      <input class="form-input" id="gd-edit-product-type" placeholder="Product type" value="${escapeAttr(record.productType || "")}" style="flex:1;">
+      <input class="form-input" id="gd-edit-series" placeholder="Series / Franchise" value="${escapeAttr(record.seriesFranchise || "")}" style="flex:1;">
+    </div>
+    <div class="field-label" style="padding:0;">Source</div>
+    <input class="form-input" id="gd-edit-source" value="${escapeAttr(record.source || "")}" style="margin-bottom:6px;">
+    <div class="field-label" style="padding:0;">Set type</div>
+    <div class="form-row" style="margin-bottom:10px;">
+      <select class="form-input" id="gd-edit-set-type">
+        <option value="">Set type…</option>
+        ${opt("Full Set", record.setType)}${opt("Partial", record.setType)}${opt("Singles", record.setType)}
+      </select>
+    </div>
+    <div class="field-label" style="padding:0;">Remarks</div>
+    <input class="form-input" id="gd-edit-remarks" value="${escapeAttr(record.remarks || "")}" style="margin-bottom:10px;">
+    <div class="form-row" style="margin-bottom:10px;">
+      <input class="form-input" id="gd-edit-purchase-price" placeholder="Purchase price" value="${record.purchasePrice != null ? escapeAttr(record.purchasePrice) : ""}" style="flex:1;">
+      <select class="form-input" id="gd-edit-purchase-currency" style="flex:0 0 90px;">
+        ${["JPY", "SGD", "AUD", "RMB", "MYR", "USD"].map((c) => opt(c, record.purchaseCurrency || "JPY")).join("")}
+      </select>
+    </div>
+    <div class="form-row" style="margin-bottom:10px;">
+      <div style="flex:1;">
+        <div class="field-label" style="padding:0; margin:0 0 4px;">Purchase date</div>
+        <input class="form-input" type="date" id="gd-edit-purchase-date" value="${escapeAttr(record.purchaseDate || "")}">
+      </div>
+      <div style="flex:0 0 100px;">
+        <div class="field-label" style="padding:0; margin:0 0 4px;">Quantity</div>
+        <input class="form-input" type="number" min="0" id="gd-edit-quantity" value="${record.quantity != null ? record.quantity : ""}">
+      </div>
+    </div>
+    <div class="field-label" style="padding:0;">References link</div>
+    <input class="form-input" id="gd-edit-reference-link" value="${escapeAttr(record.referenceLink || "")}" style="margin-bottom:14px;">
+
+    ${existingExtraUrls.length ? `
+    <div class="field-label" style="padding:0;">Existing additional photos</div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;">
+      ${existingExtraUrls.map((u) => `<img src="${escapeAttr(u)}" alt="" style="width:50px; height:50px; object-fit:cover; border-radius:6px; border:1px solid var(--line);">`).join("")}
+    </div>` : ""}
+    <div class="field-label" style="padding:0;">Add a photo</div>
+    <div class="form-row" style="margin-bottom:6px; gap:8px;">
+      <label class="fetch-btn" style="flex:1; display:flex; align-items:center; justify-content:center; padding:10px; text-align:center;">
+        📁 Upload
+        <input type="file" id="gd-edit-photo-file" accept="image/*" multiple style="display:none;" onchange="addGoodsEditPhotoFiles(this)">
+      </label>
+      <label class="fetch-btn" style="flex:1; display:flex; align-items:center; justify-content:center; padding:10px; text-align:center;">
+        📷 Camera
+        <input type="file" id="gd-edit-photo-camera" accept="image/*" capture="environment" style="display:none;" onchange="addGoodsEditPhotoFiles(this)">
+      </label>
+    </div>
+    <div class="url-row" style="margin-bottom:6px;">
+      <input class="url-input" id="gd-edit-photo-link" placeholder="Or paste an image link…">
+      <button class="fetch-btn" onclick="addGoodsEditPhotoLink()">Add</button>
+    </div>
+    <div id="gd-edit-photos-preview" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;"></div>
+    <div id="gd-edit-status" style="margin:0 0 8px; font-family:var(--mono); font-size:10.5px; color:var(--teal);"></div>
+    <div class="form-row" style="gap:8px;">
+      <button class="save-btn" style="flex:1; margin:0; background:var(--ink-3); color:var(--text);" onclick="cancelGoodsDetailEdit()">Cancel</button>
+      <button class="save-btn" style="flex:1; margin:0;" onclick="saveGoodsDetailEdit()">Save</button>
+    </div>
+  `;
+  formEl.style.display = "block";
+  gridEl.style.display = "none";
+  const pricingEl = document.getElementById("gd-pricing-section");
+  if (pricingEl) pricingEl.style.display = "none";
+  const btnEl = document.getElementById("gd-edit-toggle-btn");
+  if (btnEl) { btnEl.textContent = "✕"; btnEl.title = "Cancel editing"; }
+}
+
+function cancelGoodsDetailEdit() {
+  goodsEditExtraPhotos = [];
+  const formEl = document.getElementById("gd-edit-form");
+  const gridEl = document.getElementById("gd-details");
+  const pricingEl = document.getElementById("gd-pricing-section");
+  if (formEl) { formEl.style.display = "none"; formEl.innerHTML = ""; }
+  if (gridEl) gridEl.style.display = "";
+  if (pricingEl) pricingEl.style.display = "";
+  const btnEl = document.getElementById("gd-edit-toggle-btn");
+  if (btnEl) { btnEl.textContent = "✎"; btnEl.title = "Edit"; }
+}
+
+function addGoodsEditPhotoFiles(input) {
+  Array.from(input.files || []).forEach((file) => goodsEditExtraPhotos.push({ type: "file", file }));
+  input.value = "";
+  renderGoodsEditPhotosPreview();
+}
+
+function addGoodsEditPhotoLink() {
+  const input = document.getElementById("gd-edit-photo-link");
+  const url = input.value.trim();
+  if (!url) return;
+  goodsEditExtraPhotos.push({ type: "link", url: normalizeUrl(url) });
+  input.value = "";
+  renderGoodsEditPhotosPreview();
+}
+
+function removeGoodsEditPhoto(index) {
+  goodsEditExtraPhotos.splice(index, 1);
+  renderGoodsEditPhotosPreview();
+}
+
+function renderGoodsEditPhotosPreview() {
+  const preview = document.getElementById("gd-edit-photos-preview");
+  if (!preview) return;
+  preview.innerHTML = "";
+  goodsEditExtraPhotos.forEach((photo, i) => {
+    const src = photo.type === "file" ? URL.createObjectURL(photo.file) : photo.url;
+    const wrap = document.createElement("div");
+    wrap.style.cssText = "position:relative; width:50px; height:50px;";
+    wrap.innerHTML = `
+      <img src="${escapeAttr(src)}" style="width:100%; height:100%; object-fit:cover; border-radius:6px; border:1px solid var(--line);">
+      <span onclick="removeGoodsEditPhoto(${i})" style="position:absolute; top:-6px; right:-6px; width:18px; height:18px; border-radius:50%; background:var(--coral); color:#fff; font-size:11px; display:flex; align-items:center; justify-content:center; cursor:pointer;">✕</span>
+    `;
+    preview.appendChild(wrap);
+  });
+}
+
+async function saveGoodsDetailEdit() {
+  const record = goodsRecords.find((r) => r.id === currentGoodsDetailId);
+  if (!record) return;
+  const statusEl = document.getElementById("gd-edit-status");
+
+  const purchasePriceRaw = valueOf("gd-edit-purchase-price");
+  const quantityRaw = valueOf("gd-edit-quantity");
+
+  const updated = {
+    ...record,
+    name: valueOf("gd-edit-name") || record.name,
+    subName: valueOf("gd-edit-sub-name") || null,
+    brand: valueOf("gd-edit-brand") || null,
+    productType: valueOf("gd-edit-product-type") || null,
+    seriesFranchise: valueOf("gd-edit-series") || null,
+    source: valueOf("gd-edit-source") || null,
+    setType: valueOf("gd-edit-set-type") || null,
+    remarks: valueOf("gd-edit-remarks") || null,
+    purchasePrice: parsePriceValue(purchasePriceRaw),
+    purchaseCurrency: purchasePriceRaw ? (valueOf("gd-edit-purchase-currency") || "JPY") : null,
+    purchaseDate: valueOf("gd-edit-purchase-date") || null,
+    quantity: quantityRaw !== "" ? Number(quantityRaw) : 0,
+    referenceLink: valueOf("gd-edit-reference-link") || null,
+  };
+
+  if (goodsEditExtraPhotos.length) {
+    const tempId = uniqueImageId(record.name);
+    const existingKeys = record.imageBlobKeys || (record.imageBlobKey ? [record.imageBlobKey] : []);
+    const newKeys = [];
+    for (let i = 0; i < goodsEditExtraPhotos.length; i++) {
+      const photo = goodsEditExtraPhotos[i];
+      if (statusEl) statusEl.textContent = `Uploading photo ${i + 1} of ${goodsEditExtraPhotos.length}…`;
+      try {
+        let imgData;
+        if (photo.type === "file") {
+          const base64 = await fileToBase64(photo.file);
+          imgData = await apiJson(`${API_BASE}/upload-card-image`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ imageBase64: base64, contentType: photo.file.type || "image/jpeg", cardId: `${tempId}-${existingKeys.length + i}` }),
+          });
+        } else {
+          imgData = await apiJson(`${API_BASE}/store-external-image`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ imageUrl: photo.url, cardId: `${tempId}-${existingKeys.length + i}` }),
+          });
+        }
+        newKeys.push(imgData.blobKey);
+      } catch (imgErr) {
+        showToast(`Photo ${i + 1} failed: ${imgErr.message}`);
+      }
+    }
+    if (newKeys.length) {
+      updated.imageBlobKeys = [...existingKeys, ...newKeys];
+      updated.imageBlobKey = updated.imageBlobKeys[0];
+    }
+  }
+
+  if (statusEl) statusEl.textContent = "Saving…";
+  try {
+    await apiJson(`${API_BASE}/goods-save`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updated),
+    });
+    goodsEditExtraPhotos = [];
+    await refreshAllGoods();
+    openGoodsDetail(currentGoodsDetailId);
+    showToast("Item updated.");
+  } catch (err) {
+    if (statusEl) statusEl.textContent = "Save failed: " + err.message;
+  }
+}
+
+async function deleteGoodsItem(id) {
+  try {
+    await apiJson(`${API_BASE}/goods-delete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    closeGoodsDetail();
+    await refreshAllGoods();
+    showToast("Item deleted.");
+  } catch (err) {
+    showToast("Couldn't delete: " + err.message);
+  }
+}
+
+// ---- Goods: clone --------------------------------------------------------
+// Same pattern as TCG's clone-modal — everything else copies from the
+// original, only a few fields get asked for since those are the ones
+// that actually tend to vary between separately-bought copies of the
+// same item. Blank Purchase Price clones as a new Wanted listing,
+// matching TCG's own clone convention.
+let goodsCloneSourceId = null;
+
+function cloneGoodsItem(id) {
+  closeGoodsSwipeRow(id);
+  const record = goodsRecords.find((r) => r.id === id);
+  if (!record) return;
+  goodsCloneSourceId = id;
+
+  document.getElementById("gcm-title").textContent = `Clone "${record.name}"`;
+  document.getElementById("gcm-set-type").value = record.setType || "";
+  document.getElementById("gcm-remarks").value = record.remarks || "";
+  document.getElementById("gcm-purchase-price").value = "";
+  document.getElementById("gcm-purchase-currency").value = record.purchaseCurrency || "JPY";
+  document.getElementById("gcm-status").textContent = "";
+
+  document.getElementById("goods-clone-modal").classList.add("open");
+}
+
+function closeGoodsCloneModal() {
+  document.getElementById("goods-clone-modal").classList.remove("open");
+  goodsCloneSourceId = null;
+}
+
+async function submitGoodsClone() {
+  const record = goodsRecords.find((r) => r.id === goodsCloneSourceId);
+  if (!record) return;
+  const statusEl = document.getElementById("gcm-status");
+
+  const setType = valueOf("gcm-set-type") || null;
+  const remarks = valueOf("gcm-remarks") || null;
+  const purchasePriceRaw = valueOf("gcm-purchase-price");
+  const purchasePrice = parsePriceValue(purchasePriceRaw);
+  const purchaseCurrency = purchasePriceRaw ? (valueOf("gcm-purchase-currency") || "JPY") : null;
+
+  const clone = {
+    ...record,
+    id: undefined, // new record — let goods-save.js generate a fresh id
+    setType,
+    remarks,
+    purchasePrice,
+    purchaseCurrency,
+    quantity: purchasePrice != null ? 1 : 0,
+    purchaseDate: purchasePrice != null ? new Date().toISOString().slice(0, 10) : null,
+    createdAt: undefined,
+    updatedAt: undefined,
+    status: undefined, // recomputed server-side
+  };
+
+  statusEl.textContent = "Saving…";
+  try {
+    await apiJson(`${API_BASE}/goods-save`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(clone),
+    });
+    closeGoodsCloneModal();
+    await refreshAllGoods();
+    showToast(`Cloned "${record.name}".`);
+  } catch (err) {
+    statusEl.textContent = "Save failed: " + err.message;
+  }
+}
+
+function renderGoodsDashboard() {
+  const heroEl = document.getElementById("goods-hero-value");
+  if (!heroEl) return; // Goods screens not in the DOM yet on this build — shouldn't happen, just a safety guard
+
+  const purchased = goodsRecords.filter((r) => r.status === "Purchased");
+  const pending = goodsRecords.filter((r) => r.status === "Pending Delivery");
+  const wanted = goodsRecords.filter((r) => r.status === "Wanted");
+
+  const sumPurchase = (list) => list.reduce((sum, r) => {
+    const cost = purchasePriceSGD(r);
+    return cost != null ? sum + cost : sum;
+  }, 0);
+
+  heroEl.textContent = formatMoney(sumPurchase(purchased));
+  setText("goods-hero-pending", "Pending Delivery: " + formatMoney(sumPurchase(pending)));
+  setText("goods-stat-total", purchased.length);
+  setText("goods-stat-unique", new Set(purchased.map(goodsGroupKey)).size);
+  setText("goods-stat-pending", pending.length);
+  setText("goods-stat-wanted", wanted.length);
+
+  const recentlyAdded = [...goodsRecords]
+    .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+    .slice(0, 5);
+  const recentEl = document.getElementById("goods-recent");
+  if (!recentEl) return;
+  if (recentlyAdded.length === 0) {
+    recentEl.innerHTML = `<div class="inv-loading" style="margin:0 22px 14px;">Nothing added yet.</div>`;
+    return;
+  }
+  recentEl.innerHTML = recentlyAdded.map((r) => {
+    const img = goodsDisplayImageUrl(r);
+    const thumbInner = img ? `<img src="${escapeAttr(img)}" alt="">` : "";
+    return `
+    <div class="row-card">
+      <div class="goods-thumb" style="width:48px; height:48px;">${thumbInner}</div>
+      <div>
+        <div class="row-title">${escapeHtml(r.name)}</div>
+        <div class="goods-row-sub">${escapeHtml(r.brand || "")}</div>
+      </div>
+      <div class="row-value"><div class="amt">${r.purchasePrice != null ? formatOriginal(r.purchasePrice, r.purchaseCurrency || "SGD") : "—"}</div></div>
+    </div>
+  `;
+  }).join("");
+}
+
+const goodsFilters = { listing: "All", productType: "All", source: "All", series: "All" };
+const GOODS_FILTER_LABELS = { listing: "Listing", productType: "Type", source: "Source", series: "Series" };
+
+function matchesGoodsFilters(record) {
+  const fieldValue = { listing: record.status, productType: record.productType, source: record.source, series: record.seriesFranchise };
+  return Object.keys(goodsFilters).every((key) => {
+    const wanted = goodsFilters[key];
+    return wanted === "All" || fieldValue[key] === wanted;
+  });
+}
+
+function matchesGoodsSearch(record) {
+  if (!goodsSearchTerm) return true;
+  const haystack = `${record.name || ""} ${record.brand || ""}`.toLowerCase();
+  return haystack.includes(goodsSearchTerm);
+}
+
+function onGoodsSearch(value) {
+  goodsSearchTerm = (value || "").trim().toLowerCase();
+  renderGoodsInventory();
+}
+
+// Same position:fixed + JS-computed-position pattern as TCG's own
+// toggleFilterMenu() — duplicated rather than shared, on purpose, to
+// keep Goods' filter state/DOM fully independent from TCG's (same
+// reasoning as everywhere else in this build: two separate, parallel
+// systems, not one shared one with mode-branches sprinkled through it).
+function toggleGoodsFilterMenu(key) {
+  const menu = document.getElementById("gfd-" + key);
+  const wasOpen = menu.classList.contains("open");
+  document.querySelectorAll(".filter-dropdown").forEach((d) => d.classList.remove("open"));
+  if (wasOpen) return;
+
+  const pill = document.getElementById("gfp-" + key);
+  const rect = pill.getBoundingClientRect();
+  menu.style.top = (rect.bottom + 6) + "px";
+  menu.style.left = rect.left + "px";
+  menu.classList.add("open");
+
+  const menuRect = menu.getBoundingClientRect();
+  const overflowRight = menuRect.right - (window.innerWidth - 12);
+  if (overflowRight > 0) {
+    menu.style.left = Math.max(12, rect.left - overflowRight) + "px";
+  }
+}
+
+function selectGoodsFilter(key, value, optionEl) {
+  goodsFilters[key] = value;
+  document.getElementById("gfp-" + key).textContent = GOODS_FILTER_LABELS[key] + ": " + value;
+  document.getElementById("gfp-" + key).classList.toggle("active-filter", value !== "All");
+
+  const menu = document.getElementById("gfd-" + key);
+  menu.querySelectorAll(".filter-option").forEach((o) => o.classList.remove("selected"));
+  optionEl.classList.add("selected");
+  menu.classList.remove("open");
+
+  renderGoodsInventory();
+}
+
+// Product Type/Source/Series are free text (no fixed vocabulary the way
+// TCG's Language/Set/Rarity have), so their filter dropdowns can't be
+// static HTML the way TCG's are — rebuilt here from whatever distinct
+// values actually exist in the current data, every time it refreshes.
+// "Listing" is the one Goods filter with a genuinely fixed set of
+// values (the 3 statuses), so it stays static HTML like TCG's.
+function rebuildGoodsDynamicFilterOptions() {
+  const specs = [
+    { key: "productType", field: "productType" },
+    { key: "source", field: "source" },
+    { key: "series", field: "seriesFranchise" },
+  ];
+  specs.forEach(({ key, field }) => {
+    const menu = document.getElementById("gfd-" + key);
+    if (!menu) return;
+    const values = [...new Set(goodsRecords.map((r) => r[field]).filter(Boolean))].sort();
+    const current = goodsFilters[key];
+    menu.innerHTML = [
+      `<div class="filter-option${current === "All" ? " selected" : ""}" onclick="selectGoodsFilter('${key}','All', this)">All</div>`,
+      ...values.map((v) => `<div class="filter-option${current === v ? " selected" : ""}" data-filter-value="${escapeAttr(v)}" onclick="selectGoodsFilter('${key}', this.dataset.filterValue, this)">${escapeHtml(v)}</div>`),
+    ].join("");
+  });
+}
+
+// ---- Goods: xlsx import/export ----------------------------------------------
+// Same shape as TCG's own IMPORT_COLUMN_MAP/handleImportFile/
+// exportInventoryTemplate — bulk-delete-safe (goods-delete.js was built
+// bulk-capable from the start, unlike inventory-delete.js which had to
+// learn that lesson the hard way), delete-marker-aware (parseUidForDelete()
+// is fully generic — both collections' UIDs come from the same
+// generateListingUid(), so it needs no changes to work here), and
+// currency-symbol-safe (parsePriceValue(), not a bare Number()).
+//
+// No Binder Placement column (Goods has no binder concept), no
+// Toretoku/Yuyu-tei/Condition/Grading columns (no scraping, no slabs) —
+// just the fields the Add Item form itself has.
+const GOODS_IMPORT_COLUMN_MAP = [
+  ["Listing UID", "id"],
+  ["Name", "name"],
+  ["Sub-Name", "subName"],
+  ["Brand", "brand"],
+  ["Product Type", "productType"],
+  ["Series / Franchise", "seriesFranchise"],
+  ["Source", "source"],
+  ["Set Type", "setType"],
+  ["Remarks", "remarks"],
+  ["Purchase Price", "purchasePrice"],
+  ["Purchase Currency", "purchaseCurrency"],
+  ["Purchase Date", "purchaseDate"],
+  ["Quantity", "quantity"],
+  ["References Link", "referenceLink"],
+  ["Image Link", "imageLink"],
+  ["Additional Photos", "extraPhotoLinks"],
+  ["Group Image", "groupImageLink"],
+];
+
+function triggerGoodsImport() {
+  document.getElementById("goods-import-file-input").click();
+}
+
+async function handleGoodsImportFile(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+
+  const statusEl = document.getElementById("goods-import-status");
+  if (statusEl) statusEl.textContent = "Reading file…";
+
+  try {
+    const buffer = await file.arrayBuffer();
+    const workbook = XLSX.read(buffer, { type: "array" });
+    const sheetName = workbook.SheetNames.includes("Items") ? "Items" : workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+    const allRows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+
+    // Delete-marked rows first — pulled out before the "needs a Name"
+    // filter below, same reasoning as TCG's own import: a delete-only
+    // row has nothing else filled in, so it'd otherwise get silently
+    // dropped instead of acted on.
+    const idsToDelete = [];
+    const rows = [];
+    allRows.forEach((row) => {
+      const deleteUid = parseUidForDelete(row["Listing UID"]);
+      if (deleteUid) idsToDelete.push(deleteUid);
+      else rows.push(row);
+    });
+
+    let deletedCount = 0;
+    let deleteFailures = 0;
+    if (idsToDelete.length) {
+      if (statusEl) statusEl.textContent = `Deleting ${idsToDelete.length} item(s)…`;
+      try {
+        const result = await apiJson(`${API_BASE}/goods-delete`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids: idsToDelete }),
+        });
+        deletedCount = result.deletedCount;
+        deleteFailures = idsToDelete.length - deletedCount;
+      } catch (err) {
+        deleteFailures = idsToDelete.length;
+        console.warn("Bulk delete failed:", err.message);
+      }
+    }
+
+    // Only Name is required — matches goods-save.js's own validation.
+    const rowsWithName = rows.filter((row) => String(row["Name"] || "").trim());
+    const skippedNoName = rows.length - rowsWithName.length;
+
+    const records = rowsWithName.map((row) => {
+      const rec = {};
+      GOODS_IMPORT_COLUMN_MAP.forEach(([col, field]) => {
+        let value = row[col];
+        if (value === "" || value === undefined) value = undefined;
+        if (field === "quantity") value = value === undefined ? 0 : Number(value);
+        if (field === "purchasePrice") value = parsePriceValue(value);
+        if (field === "purchaseDate" && value instanceof Date) {
+          value = value.toISOString().slice(0, 10);
+        }
+        if (field === "extraPhotoLinks") {
+          value = value === undefined ? [] : String(value).split("+").map((s) => s.trim()).filter(Boolean);
+        }
+        if (value !== undefined) rec[field] = value;
+      });
+      if (!rec.id) delete rec.id; // blank Listing UID -> new item
+      return rec;
+    });
+
+    if (records.length === 0) {
+      if (statusEl) {
+        statusEl.textContent = idsToDelete.length
+          ? `Deleted ${deletedCount} item(s).` + (deleteFailures ? ` ${deleteFailures} couldn't be deleted (already gone?).` : "")
+          : "No valid rows found (need at least a Name, or a Listing UID marked for deletion).";
+      }
+      if (idsToDelete.length) await refreshAllGoods();
+      return;
+    }
+
+    // Image Link/Additional Photos are transient inputs here (like the
+    // Add Item form's own goodsHeroPhoto/goodsExtraPhotos staging) —
+    // fetched into blobs, then discarded rather than kept as record
+    // fields, unlike TCG's own "Image Link" which persists as a real
+    // fallback field.
+    const rowsNeedingImages = records.filter((r) => r.imageLink || (r.extraPhotoLinks && r.extraPhotoLinks.length));
+    let imageFailures = 0;
+    if (rowsNeedingImages.length) {
+      let done = 0;
+      for (const rec of records) {
+        const links = [];
+        if (rec.imageLink) links.push(rec.imageLink);
+        if (rec.extraPhotoLinks) links.push(...rec.extraPhotoLinks);
+
+        if (!links.length) continue;
+        done++;
+        if (statusEl) statusEl.textContent = `Fetching images for item ${done} of ${rowsNeedingImages.length}…`;
+
+        const tempId = uniqueImageId(rec.name);
+        const imageBlobKeys = [];
+        for (let i = 0; i < links.length; i++) {
+          try {
+            const imgData = await apiJson(`${API_BASE}/store-external-image`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ imageUrl: links[i], cardId: `${tempId}-${i}` }),
+            });
+            imageBlobKeys.push(imgData.blobKey);
+          } catch (imgErr) {
+            imageFailures++;
+            console.warn(`Image ${i + 1} for "${rec.name}" failed:`, imgErr.message);
+          }
+        }
+        if (imageBlobKeys.length) {
+          rec.imageBlobKeys = imageBlobKeys;
+          rec.imageBlobKey = imageBlobKeys[0];
+        }
+      }
+    }
+
+    // Group Image is separate from the item's own hero/additional
+    // photos — it's what a *group* of same-Name items displays instead
+    // of the first member's own photo (see goodsGroupImageUrl()), so
+    // any member row with one set contributes it independently.
+    const rowsNeedingGroupImage = records.filter((r) => r.groupImageLink);
+    if (rowsNeedingGroupImage.length) {
+      let done = 0;
+      for (const rec of records) {
+        if (!rec.groupImageLink) continue;
+        done++;
+        if (statusEl) statusEl.textContent = `Fetching group images ${done} of ${rowsNeedingGroupImage.length}…`;
+        try {
+          const tempId = uniqueImageId(rec.name);
+          const imgData = await apiJson(`${API_BASE}/store-external-image`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ imageUrl: rec.groupImageLink, cardId: `${tempId}-group` }),
+          });
+          rec.groupImageBlobKey = imgData.blobKey;
+        } catch (imgErr) {
+          imageFailures++;
+          console.warn(`Group image for "${rec.name}" failed:`, imgErr.message);
+        }
+      }
+    }
+    records.forEach((rec) => { delete rec.extraPhotoLinks; delete rec.imageLink; delete rec.groupImageLink; });
+
+    if (statusEl) statusEl.textContent = `Uploading ${records.length} item(s)…`;
+
+    const data = await apiJson(`${API_BASE}/goods-save`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ records }),
+    });
+
+    if (statusEl) {
+      let summary = `Imported ${data.saved.length} item(s). Total inventory: ${data.count}.`;
+      if (idsToDelete.length) summary += ` Deleted ${deletedCount} item(s).` + (deleteFailures ? ` ${deleteFailures} couldn't be deleted (already gone?).` : "");
+      if (skippedNoName) summary += ` ${skippedNoName} row${skippedNoName === 1 ? "" : "s"} skipped — no Name.`;
+      if (data.skipped && data.skipped.length) summary += ` ${data.skipped.length} row${data.skipped.length === 1 ? "" : "s"} rejected by the server (${data.skipped.map((s) => s.error).join("; ")}).`;
+      if (imageFailures) summary += ` (${imageFailures} image link${imageFailures === 1 ? "" : "s"} couldn't be fetched — check the URLs and retry those items.)`;
+      statusEl.textContent = summary;
+    }
+    await refreshAllGoods();
+  } catch (err) {
+    if (statusEl) statusEl.textContent = "Import failed: " + err.message;
+  }
+}
+
+function exportGoodsTemplate() {
+  if (!goodsRecords.length) {
+    showToast("No items in inventory yet to export.");
+    return;
+  }
+  const headers = [...GOODS_IMPORT_COLUMN_MAP.map(([col]) => col), "Stored Image URLs", "Stored Group Image URL"];
+  const rows = goodsRecords.map((r) => {
+    const row = {};
+    GOODS_IMPORT_COLUMN_MAP.forEach(([col, field]) => {
+      if (field === "extraPhotoLinks" || field === "imageLink" || field === "groupImageLink") { row[col] = ""; return; }
+      let value = r[field];
+      if (value == null) value = "";
+      row[col] = value;
+    });
+    row["Stored Image URLs"] = imageUrlsFor(r).join(" + ");
+    row["Stored Group Image URL"] = r.groupImageBlobKey ? `${API_BASE}/serve-card-image?key=${encodeURIComponent(r.groupImageBlobKey)}` : "";
+    return row;
+  });
+
+  const itemsSheet = XLSX.utils.json_to_sheet(rows, { header: headers });
+  itemsSheet["!cols"] = headers.map(() => ({ wch: 22 }));
+
+  const legendRows = [
+    ["TangStash — Goods Export"],
+    ["Every item currently in your Goods inventory, one row per listing. Re-upload this file (edited or not) from the Inventory screen's import icon (⇅) to mass-update — matched by Listing UID, same as the blank import template."],
+    [],
+    ["Column", "Notes"],
+    ["Listing UID", "Matches an existing item on re-import — updates it in place instead of creating a duplicate. Don't edit this."],
+    ["Image Link", "Always blank on export — only a stored photo's blob survives, not its original link. Leave blank on re-import too; it won't remove the existing hero photo."],
+    ["Additional Photos", "Always blank on export, same reason as Image Link above."],
+    ["Group Image", "Always blank on export, same reason as Image Link above. When items sharing the same Name are grouped, this is the image shown for the group instead of the first item's own photo — set it on any one (or more) of the grouped rows."],
+    ["Stored Image URLs", "Reference only, not read back in on re-import — every image currently stored for this item (hero + additional), '+'-joined."],
+    ["Stored Group Image URL", "Reference only, not read back in on re-import — the currently-stored Group Image for this item, if one was ever set on it."],
+  ];
+  const legendSheet = XLSX.utils.aoa_to_sheet(legendRows);
+  legendSheet["!cols"] = [{ wch: 30 }, { wch: 95 }];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, legendSheet, "Legend");
+  XLSX.utils.book_append_sheet(wb, itemsSheet, "Items");
+
+  XLSX.writeFile(wb, `tangstash-goods-export-${new Date().toISOString().slice(0, 10)}.xlsx`);
+}
+
+// Mirrors TCG's own goToInventoryFiltered() — some stats share the same
+// target filter rather than each needing a uniquely filterable value
+// (e.g. "Total items" and "Unique items" both just mean "show me my
+// purchased items", displayed as two different metrics on the same
+// underlying set — same reasoning TCG's own "Unique cards" stat uses).
+function goToGoodsInventoryFiltered(filters) {
+  Object.keys(goodsFilters).forEach((key) => { goodsFilters[key] = "All"; });
+  Object.assign(goodsFilters, filters);
+
+  Object.keys(goodsFilters).forEach((key) => {
+    const pill = document.getElementById("gfp-" + key);
+    if (!pill) return;
+    const value = goodsFilters[key];
+    pill.textContent = GOODS_FILTER_LABELS[key] + ": " + value;
+    pill.classList.toggle("active-filter", value !== "All");
+    const menu = document.getElementById("gfd-" + key);
+    if (menu) {
+      menu.querySelectorAll(".filter-option").forEach((o) => {
+        o.classList.toggle("selected", o.textContent.trim() === value);
+      });
+    }
+  });
+
+  goodsSearchTerm = "";
+  const searchInput = document.getElementById("goods-search-input");
+  if (searchInput) searchInput.value = "";
+
+  showGoodsScreen("inventory");
+  renderGoodsInventory();
+}
+
+// One shared view-mode toggle for all three screens (Inventory,
+// Pending, Wanted) rather than each having its own — see
+// renderGoodsList()'s comment for why. Updates every screen's toggle
+// icon and re-renders every list so all three stay in sync regardless
+// of which screen's toggle button was actually tapped.
+function toggleGoodsViewMode() {
+  goodsViewMode = goodsViewMode === "list" ? "tile" : "list";
+  const icon = goodsViewMode === "list" ? "☰" : "▦";
+  ["goods-view-toggle-btn", "goods-pending-view-toggle-btn", "goods-wanted-view-toggle-btn"].forEach((id) => {
+    const btn = document.getElementById(id);
+    if (btn) btn.textContent = icon;
+  });
+  renderGoodsInventory();
+  renderGoodsStatusList("Pending Delivery", "goods-pending-list");
+  renderGoodsStatusList("Wanted", "goods-wanted-list");
+}
+
+// Grouped by Name only (not brand/source/etc — a deliberate, simpler
+// rule than TCG's own grouping, which folds in card number/artist/
+// language too). A group of one renders exactly like an ungrouped row
+// always has; only 2+ get the group-header treatment. Sub-name (see
+// renderGoodsRow()) is what lets you tell same-name items apart once
+// expanded, without it being part of what groups them together.
+let expandedGoodsGroups = new Set();
+
+function goodsGroupKey(record) {
+  return String(record.name ?? "");
+}
+
+// Re-renders all three lists (Inventory, Pending, Wanted), not just
+// whichever screen the tap happened on — a group with this key could
+// be showing on more than one of them at once (different status
+// subsets of the same-Name items), and expandedGoodsGroups is one
+// shared set across all three, so a toggle should stay in sync
+// everywhere it's visible, not just where it was triggered from.
+function toggleGoodsGroup(groupKey) {
+  if (expandedGoodsGroups.has(groupKey)) expandedGoodsGroups.delete(groupKey);
+  else expandedGoodsGroups.add(groupKey);
+  renderGoodsInventory();
+  renderGoodsStatusList("Pending Delivery", "goods-pending-list");
+  renderGoodsStatusList("Wanted", "goods-wanted-list");
+}
+
+// Uses a group's dedicated Group Image (set via the import template's
+// "Group Image" column, stored as groupImageBlobKey on whichever
+// member row(s) had it set) if any member of the group has one,
+// otherwise falls back to the first member's own photo — shared by
+// both the list group header and the tile group card below, so the
+// two views never disagree about which image represents a group.
+function goodsGroupImageUrl(group) {
+  const withGroupImage = group.find((r) => r.groupImageBlobKey);
+  if (withGroupImage) {
+    return `${API_BASE}/serve-card-image?key=${encodeURIComponent(withGroupImage.groupImageBlobKey)}`;
+  }
+  return imageUrlFor(group[0]);
+}
+
+// Single-record equivalent of goodsGroupImageUrl() above, for anywhere
+// one item renders on its own rather than as part of a 2+ group (a
+// single-item "group of one" still has the same priority: its own
+// Group Image, if it happens to have one set, wins over its regular
+// photo — set via the import template independently of whether that
+// item currently has any same-Name siblings to actually group with).
+function goodsDisplayImageUrl(record) {
+  if (record.groupImageBlobKey) {
+    return `${API_BASE}/serve-card-image?key=${encodeURIComponent(record.groupImageBlobKey)}`;
+  }
+  return imageUrlFor(record);
+}
+
+function renderGoodsInventory() {
+  const filtered = goodsRecords.filter(matchesGoodsFilters).filter(matchesGoodsSearch);
+  renderGoodsList(filtered, "goods-list", "No items match yet.");
+}
+
+// Header row for a group of 2+ items sharing a Name — tap to expand/
+// collapse the individual items beneath it (each rendered with the same
+// renderGoodsRow() used everywhere else, so swipe-to-clone/delete and
+// tap-for-detail keep working unchanged once expanded). Reuses TCG's
+// .inv-group-count-badge/.inv-group-chevron/.inv-group-members CSS —
+// those are purely structural/visual, not tied to TCG's own .inv-item
+// row layout, so they compose fine with Goods' .row-card layout here.
+function renderGoodsGroup(group) {
+  const groupKey = goodsGroupKey(group[0]);
+  const isExpanded = expandedGoodsGroups.has(groupKey);
+  const groupImg = goodsGroupImageUrl(group);
+  const thumbInner = groupImg ? `<img src="${escapeAttr(groupImg)}" alt="">` : "";
+
+  const statusCounts = {};
+  group.forEach((r) => { statusCounts[r.status] = (statusCounts[r.status] || 0) + 1; });
+  const statusText = ["Purchased", "Pending Delivery", "Wanted"]
+    .filter((s) => statusCounts[s])
+    .map((s) => `${statusCounts[s]} ${s}`)
+    .join(", ");
+
+  const totalValue = group.reduce((sum, r) => {
+    const v = purchasePriceSGD(r);
+    return v != null ? sum + v : sum;
+  }, 0);
+
+  return `
+    <div class="inv-group-wrap" style="margin:0 22px 10px;">
+      <div class="row-card inv-group-header" style="margin:0;" data-group-key="${escapeAttr(groupKey)}" onclick="toggleGoodsGroup(this.dataset.groupKey)">
+        <div class="goods-thumb" style="width:48px; height:48px; position:relative;">${thumbInner}<span class="inv-group-count-badge">×${group.length}</span></div>
+        <div>
+          <div class="row-title">${escapeHtml(group[0].name)}</div>
+          <div class="goods-row-sub">${escapeHtml(statusText)}</div>
+        </div>
+        <div class="row-value">
+          <div class="amt">${formatMoney(totalValue)}</div>
+          <div class="inv-group-chevron${isExpanded ? " open" : ""}">▾</div>
+        </div>
+      </div>
+      ${isExpanded ? `<div class="inv-group-members">${group.map((r) => renderGoodsRow(r, true)).join("")}</div>` : ""}
+    </div>
+  `;
+}
+
+// Tile-view equivalent of renderGoodsGroup() above — same expand/
+// collapse concept, but since a tile grid has no natural "indent a
+// sub-list beneath this one item" the way a vertical list does, the
+// group's own card stays visible in both states (its sub-text just
+// flips between "Tap to expand"/"Tap to collapse") and the individual
+// member tiles are inserted right after it in the grid when expanded,
+// rather than replacing it.
+function renderGoodsGroupTile(group) {
+  const groupKey = goodsGroupKey(group[0]);
+  const isExpanded = expandedGoodsGroups.has(groupKey);
+  const groupImg = goodsGroupImageUrl(group);
+  const thumbInner = groupImg ? `<img src="${escapeAttr(groupImg)}" alt="">` : "";
+
+  const headerTile = `
+    <div class="goods-tile" data-group-key="${escapeAttr(groupKey)}" onclick="toggleGoodsGroup(this.dataset.groupKey)">
+      <div class="goods-tile-thumb" style="position:relative;">${thumbInner}<span class="inv-group-count-badge">×${group.length}</span></div>
+      <div class="goods-tile-name">${escapeHtml(group[0].name)}</div>
+      <div class="goods-tile-sub">${isExpanded ? "Tap to collapse" : "Tap to expand"}</div>
+    </div>
+  `;
+
+  if (!isExpanded) return headerTile;
+  return headerTile + group.map((r) => renderGoodsTile(r, true)).join("");
+}
+
+// Nested (inside an expanded inv-group-members list) skips .swipe-row's
+// own 22px side margins, matching TCG's own nested-row convention —
+// .inv-group-members already provides the screen-edge margin and indent.
+// A nested row always shows its OWN photo (imageUrlFor), never
+// goodsDisplayImageUrl()'s Group-Image-first logic — that logic is for
+// a record representing itself (standalone, or via Recently Added), not
+// for a specific member already sitting inside its group's own expanded
+// listing, where showing the same Group Image on every member would
+// defeat the point of expanding it to see them individually. It's the
+// member that actually HAS groupImageBlobKey set (from the import
+// template) whose own nested row this bug showed up on first.
+function renderGoodsRow(record, nested) {
+  const img = nested ? imageUrlFor(record) : goodsDisplayImageUrl(record);
+  const thumbInner = img ? `<img src="${escapeAttr(img)}" alt="">` : "";
+  const rowStyle = nested ? ` style="margin:0 0 8px;"` : "";
+  // Nested: just the sub-name — the group header above already shows
+  // the shared Name, so repeating it on every member is redundant.
+  // Falls back to Name if this particular member has no sub-name set
+  // (grouped items aren't guaranteed to all have one), so the title is
+  // never blank. Standalone rows are unaffected — full Name (+ sub-name
+  // if set) as before, since there's no group header showing the name
+  // elsewhere in that case.
+  const titleText = nested
+    ? escapeHtml(record.subName || record.name)
+    : escapeHtml(record.name) + (record.subName ? " — " + escapeHtml(record.subName) : "");
+
+  return `
+    <div class="swipe-row"${rowStyle}>
+      <div class="swipe-action swipe-action-left" onclick="cloneGoodsItem('${escapeAttr(record.id)}')">
+        <span class="swipe-action-icon">⧉</span><span>Clone</span>
+      </div>
+      <div class="swipe-action swipe-action-right" onclick="confirmDeleteGoodsItem('${escapeAttr(record.id)}')">
+        <span class="swipe-action-icon">🗑</span><span>Delete</span>
+      </div>
+      <div class="row-card swipe-content" style="margin:0;" data-row-id="${escapeAttr(record.id)}" onclick="handleGoodsRowClick('${escapeAttr(record.id)}')">
+        <div class="goods-thumb" style="width:48px; height:48px;">${thumbInner}</div>
+        <div>
+          <div class="row-title">${titleText}</div>
+          <div class="goods-row-sub">${escapeHtml(record.brand || "")}${record.productType ? " · " + escapeHtml(record.productType) : ""}</div>
+          ${record.setType ? `<span class="pm-pill" style="margin-top:5px; display:inline-block;">${escapeHtml(record.setType)}</span>` : ""}
+        </div>
+        <div class="row-value"><div class="amt">${record.purchasePrice != null ? formatOriginal(record.purchasePrice, record.purchaseCurrency || "SGD") : "—"}</div></div>
+      </div>
+    </div>
+  `;
+}
+
+// Same nested-vs-standalone distinction as renderGoodsRow() above —
+// nested is true only when this tile is a member inside an already-
+// expanded tile-group (see renderGoodsGroupTile()).
+function renderGoodsTile(record, nested) {
+  const img = nested ? imageUrlFor(record) : goodsDisplayImageUrl(record);
+  const thumbInner = img ? `<img src="${escapeAttr(img)}" alt="">` : "";
+  // Same nested-vs-standalone title rule as renderGoodsRow() — see its
+  // comment for why.
+  const titleText = nested
+    ? escapeHtml(record.subName || record.name)
+    : escapeHtml(record.name) + (record.subName ? " — " + escapeHtml(record.subName) : "");
+  return `
+    <div class="goods-tile" onclick="openGoodsDetail('${escapeAttr(record.id)}')">
+      <div class="goods-tile-thumb">${thumbInner}</div>
+      <div class="goods-tile-name">${titleText}</div>
+      <div class="goods-tile-sub">${escapeHtml(record.brand || "")}${record.productType ? " · " + escapeHtml(record.productType) : ""}</div>
+      ${record.setType ? `<span class="pm-pill goods-tile-pill">${escapeHtml(record.setType)}</span>` : ""}
+    </div>
+  `;
+}
+
+// ---- Goods: Add Item form ---------------------------------------------------
+// Hero Image is a single photo (unlike TCG's own "Image Link" fallback
+// pattern, this IS the primary way to set Goods' main photo — there's
+// no scrape to fall back from, since Goods has no market-pricing
+// sources at all). Additional images are the same multi-photo
+// upload/camera/paste-link pattern as everywhere else in the app,
+// staged in their own array so this never cross-contaminates with
+// TCG's own `extraPhotos` if both forms happened to be open at once.
+let goodsHeroPhoto = null; // {type:"file", file} | {type:"link", url} | null
+let goodsExtraPhotos = [];
+
+function setGoodsHeroFromFile(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  goodsHeroPhoto = { type: "file", file };
+  renderGoodsHeroPreview();
+  input.value = "";
+}
+
+function updateGoodsHeroPreview(url) {
+  const trimmed = (url || "").trim();
+  if (!trimmed) { goodsHeroPhoto = null; renderGoodsHeroPreview(); return; }
+  goodsHeroPhoto = { type: "link", url: normalizeUrl(trimmed) };
+  renderGoodsHeroPreview();
+}
+
+function renderGoodsHeroPreview() {
+  const preview = document.getElementById("goods-hero-preview");
+  if (!preview) return;
+  if (!goodsHeroPhoto) { preview.style.display = "none"; preview.innerHTML = ""; return; }
+  const src = goodsHeroPhoto.type === "file" ? URL.createObjectURL(goodsHeroPhoto.file) : goodsHeroPhoto.url;
+  preview.style.display = "block";
+  preview.innerHTML = `<img src="${escapeAttr(src)}" alt="" style="width:100%; height:100%; object-fit:cover; border-radius:inherit;" onerror="this.parentElement.style.display='none'; this.parentElement.innerHTML='';">`;
+}
+
+function addGoodsExtraPhotoFiles(input) {
+  Array.from(input.files || []).forEach((file) => goodsExtraPhotos.push({ type: "file", file }));
+  input.value = "";
+  renderGoodsExtraPhotosPreview();
+}
+
+function addGoodsExtraPhotoLink() {
+  const input = document.getElementById("goods-extra-photo-link");
+  const url = input.value.trim();
+  if (!url) return;
+  goodsExtraPhotos.push({ type: "link", url: normalizeUrl(url) });
+  input.value = "";
+  renderGoodsExtraPhotosPreview();
+}
+
+function removeGoodsExtraPhoto(index) {
+  goodsExtraPhotos.splice(index, 1);
+  renderGoodsExtraPhotosPreview();
+}
+
+function renderGoodsExtraPhotosPreview() {
+  const preview = document.getElementById("goods-extra-photos-preview");
+  if (!preview) return;
+  preview.innerHTML = "";
+  goodsExtraPhotos.forEach((photo, i) => {
+    const src = photo.type === "file" ? URL.createObjectURL(photo.file) : photo.url;
+    const wrap = document.createElement("div");
+    wrap.style.cssText = "position:relative; width:60px; height:60px;";
+    wrap.innerHTML = `
+      <img src="${escapeAttr(src)}" style="width:100%; height:100%; object-fit:cover; border-radius:6px; border:1px solid var(--line);">
+      <span onclick="removeGoodsExtraPhoto(${i})" style="position:absolute; top:-6px; right:-6px; width:18px; height:18px; border-radius:50%; background:var(--coral); color:#fff; font-size:11px; display:flex; align-items:center; justify-content:center; cursor:pointer;">✕</span>
+    `;
+    preview.appendChild(wrap);
+  });
+}
+
+function resetGoodsAddForm() {
+  ["goods-name", "goods-sub-name", "goods-brand", "goods-product-type", "goods-series", "goods-source",
+   "goods-remarks", "goods-purchase-price", "goods-quantity", "goods-reference-link",
+   "goods-hero-link", "goods-extra-photo-link"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.value = "";
+  });
+  const currencyEl = document.getElementById("goods-purchase-currency");
+  if (currencyEl) currencyEl.value = "JPY";
+  const receivedEl = document.getElementById("goods-received-checkbox");
+  if (receivedEl) receivedEl.checked = true;
+  const setTypeEl = document.getElementById("goods-set-type");
+  if (setTypeEl) setTypeEl.value = "";
+  const dateEl = document.getElementById("goods-purchase-date");
+  if (dateEl) dateEl.value = new Date().toISOString().slice(0, 10);
+
+  goodsHeroPhoto = null;
+  goodsExtraPhotos = [];
+  renderGoodsHeroPreview();
+  renderGoodsExtraPhotosPreview();
+  const statusEl = document.getElementById("goods-add-status");
+  if (statusEl) statusEl.textContent = "";
+}
+
+// Quantity is a true count (0, 1, 2, 3…), not a 0/1 flag — but it only
+// counts as "in hand" once Already Received is checked. Unchecked means
+// nothing's arrived yet regardless of what's typed there, so the saved
+// quantity is forced to 0 in that case (Pending Delivery), and whatever
+// was typed is simply honored once Received gets checked later via an
+// edit. This mirrors the TCG Add Card form's own received-checkbox role,
+// generalized from a 0/1 flag to a real count.
+async function saveGoodsItem() {
+  const statusEl = document.getElementById("goods-add-status");
+  const setStatus = (msg) => { if (statusEl) statusEl.textContent = msg; };
+
+  const name = document.getElementById("goods-name").value.trim();
+  if (!name) { setStatus("Name is required."); return; }
+
+  const purchasePriceRaw = document.getElementById("goods-purchase-price").value.trim();
+  const purchaseCurrency = document.getElementById("goods-purchase-currency").value.trim() || "JPY";
+  const received = document.getElementById("goods-received-checkbox").checked;
+  const quantityRaw = document.getElementById("goods-quantity").value.trim();
+
+  setStatus("Saving image…");
+  const tempId = uniqueImageId(name);
+  const imageBlobKeys = [];
+
+  if (goodsHeroPhoto) {
+    try {
+      let imgData;
+      if (goodsHeroPhoto.type === "file") {
+        const base64 = await fileToBase64(goodsHeroPhoto.file);
+        imgData = await apiJson(`${API_BASE}/upload-card-image`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ imageBase64: base64, contentType: goodsHeroPhoto.file.type || "image/jpeg", cardId: `${tempId}-0` }),
+        });
+      } else {
+        imgData = await apiJson(`${API_BASE}/store-external-image`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ imageUrl: goodsHeroPhoto.url, cardId: `${tempId}-0` }),
+        });
+      }
+      imageBlobKeys.push(imgData.blobKey);
+    } catch (imgErr) {
+      showToast("Hero image couldn't be stored: " + imgErr.message);
+    }
+  }
+
+  for (let i = 0; i < goodsExtraPhotos.length; i++) {
+    const photo = goodsExtraPhotos[i];
+    setStatus(`Saving photo ${i + 1} of ${goodsExtraPhotos.length}…`);
+    try {
+      let imgData;
+      if (photo.type === "file") {
+        const base64 = await fileToBase64(photo.file);
+        imgData = await apiJson(`${API_BASE}/upload-card-image`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ imageBase64: base64, contentType: photo.file.type || "image/jpeg", cardId: `${tempId}-${i + 1}` }),
+        });
+      } else {
+        imgData = await apiJson(`${API_BASE}/store-external-image`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ imageUrl: photo.url, cardId: `${tempId}-${i + 1}` }),
+        });
+      }
+      imageBlobKeys.push(imgData.blobKey);
+    } catch (imgErr) {
+      showToast(`Photo ${i + 1} couldn't be stored: ` + imgErr.message);
+    }
+  }
+
+  setStatus("Saving…");
+  try {
+    const record = {
+      name,
+      subName: document.getElementById("goods-sub-name").value.trim() || null,
+      brand: document.getElementById("goods-brand").value.trim() || null,
+      productType: document.getElementById("goods-product-type").value.trim() || null,
+      seriesFranchise: document.getElementById("goods-series").value.trim() || null,
+      source: document.getElementById("goods-source").value.trim() || null,
+      setType: document.getElementById("goods-set-type").value || null,
+      remarks: document.getElementById("goods-remarks").value.trim() || null,
+      purchasePrice: parsePriceValue(purchasePriceRaw),
+      purchaseCurrency: purchasePriceRaw ? purchaseCurrency : null,
+      purchaseDate: document.getElementById("goods-purchase-date").value || null,
+      quantity: purchasePriceRaw ? (received ? Number(quantityRaw || 1) : 0) : 0,
+      referenceLink: document.getElementById("goods-reference-link").value.trim() || null,
+      imageBlobKeys,
+      imageBlobKey: imageBlobKeys[0] || null,
+    };
+
+    await apiJson(`${API_BASE}/goods-save`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(record),
+    });
+
+    resetGoodsAddForm();
+    showToast(`${name} saved.`);
+    await refreshAllGoods();
+    showGoodsScreen("dashboard");
+  } catch (err) {
+    setStatus("Save failed: " + err.message);
+  }
 }
 
 // ---- tiny helpers ---------------------------------------------------------

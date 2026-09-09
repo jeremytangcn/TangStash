@@ -77,6 +77,74 @@
   .screen{display:none;}
   .screen.active{display:block;}
 
+  /* Goods mode's own top-level screens — a separate class from .screen
+     entirely (not just a modifier) so TCG's showScreen()/
+     document.querySelectorAll(".screen") never touches these, and vice
+     versa. Same visual rules, independent state. */
+  .goods-screen{ padding-bottom: 96px; display:none; }
+  .goods-screen.active{ display:block; }
+
+  .mode-switch-row{
+    display:flex; gap:8px; padding:0 22px; margin:2px 0 14px;
+  }
+  .mode-switch-btn{
+    flex:1; text-align:center; padding:10px; border-radius:12px;
+    font-family:var(--body); font-weight:700; font-size:13px;
+    background:var(--ink-3); border:1px solid var(--line); color:var(--text-dim);
+    cursor:pointer; user-select:none;
+  }
+  .mode-switch-btn.active{
+    background:var(--gold); color:#1a1300; border-color:var(--gold);
+  }
+
+  /* Goods inventory: Tile view (List view reuses .row-card, same as TCG's
+     own Inventory rows — no new CSS needed for that one). */
+  .goods-tile-grid{
+    display:grid; grid-template-columns: repeat(3, 1fr); gap:10px;
+    padding: 0 22px 14px;
+  }
+  .goods-tile{
+    background: var(--ink-2); border:1px solid var(--line); border-radius:14px;
+    padding:8px; cursor:pointer;
+    display:flex; flex-direction:column; align-items:center; text-align:center;
+  }
+  .goods-tile-thumb{
+    width:100%; aspect-ratio: 1 / 1; border-radius:10px; overflow:hidden;
+    background: linear-gradient(160deg, #2a2f3f, #171a24);
+    margin-bottom:6px;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .goods-tile-thumb img{ width:100%; height:100%; object-fit:cover; }
+
+  /* Square (not TCG's tall card-shaped ratio) — Goods items are things
+     like photographed merch, cushions, figures, which are typically
+     square-ish or camera-photo shaped, never a trading card's aspect
+     ratio. One shared class, sized per-context via inline width/height
+     at each usage site (list row / gallery / edit-form previews). */
+  .goods-thumb{
+    border-radius:6px; overflow:hidden; flex-shrink:0;
+    background: linear-gradient(160deg, #2a2f3f, #171a24);
+    display:flex; align-items:center; justify-content:center;
+  }
+  .goods-thumb img{ width:100%; height:100%; object-fit:cover; }
+  .goods-tile-name{ font-size:11.5px; font-weight:600; line-height:1.25; }
+  .goods-tile-sub{ font-size:10px; font-weight:400; color:var(--text-dim); margin-top:2px; }
+  /* Pushes whatever comes after the sub-text (the Set Type pill, when
+     present) to the bottom of the tile, regardless of how many lines
+     the name/sub-text above it wrap to — keeps pills aligned across a
+     row of tiles instead of floating at inconsistent heights. Only
+     applies when there's something to push; a tile with no pill just
+     ends after .goods-tile-sub as before. */
+  .goods-tile-pill{ margin-top:auto; padding-top:5px; }
+
+  /* Goods dashboard's stat grid — 2 columns, not TCG's 3 (.stat-grid),
+     since Goods only has 4 genuinely distinct, clickable stats to show
+     (no market-value or language/slab breakdowns to fill out a 3x2). */
+  .goods-stat-grid{
+    display:grid; grid-template-columns: 1fr 1fr; gap:10px;
+    padding: 0 22px; margin-top:14px;
+  }
+
   /* ---- shared header ---- */
   .app-header{
     padding: 18px 22px 14px;
@@ -211,6 +279,14 @@
   }
   .row-title{ font-size:13.5px; font-weight:600; }
   .row-sub{ font-size:11.5px; color:var(--text-dim); font-family:var(--mono); margin-top:2px;}
+  /* Goods-only variant of .row-sub — smaller and explicitly normal-
+     weight, not shared with TCG's own use of .row-sub (the Wanted
+     binder's unplaced-cards list and the slot-picker) so this doesn't
+     change anything there. Also switches off the monospace font: at
+     the same nominal weight, JetBrains Mono still reads visually
+     heavier/bolder than the body font, which was part of why the
+     un-bolded .row-sub still looked bold. */
+  .goods-row-sub{ font-size:10.5px; font-weight:400; color:var(--text-dim); font-family:var(--body); margin-top:2px; }
   .row-value{ margin-left:auto; text-align:right; }
   .row-value .amt{ font-family:var(--mono); font-weight:700; font-size:13.5px; }
   .row-value .chg{ font-size:11px; color: var(--teal); font-family:var(--mono); }
@@ -690,6 +766,32 @@
     overflow:hidden;
   }
   .image-viewer-backdrop.open{ display:flex; }
+
+  /* In-app reference-link viewer — full-screen like the image viewer
+     above, not a bottom-sheet .modal-backdrop, since a webpage needs
+     real screen space to be usable. Some sites block being embedded in
+     an iframe entirely (X-Frame-Options/CSP), and there's no reliable
+     way to detect that from JS (the iframe's load event still fires
+     either way) — so "Open in browser" is always visible in the header
+     as a fallback, not just shown conditionally on failure. */
+  .link-viewer-backdrop{
+    position:fixed; inset:0; z-index:55;
+    background: var(--ink);
+    display:none; flex-direction:column;
+  }
+  .link-viewer-backdrop.open{ display:flex; }
+  .link-viewer-header{
+    display:flex; align-items:center; gap:10px;
+    padding: 14px 16px; background: var(--ink-2); border-bottom:1px solid var(--line);
+    flex-shrink:0;
+  }
+  .link-viewer-url{
+    flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+    font-family:var(--mono); font-size:11px; color:var(--text-dim);
+  }
+  .link-viewer-backdrop iframe{
+    flex:1; width:100%; border:none; background:#fff;
+  }
   .image-viewer-backdrop img{
     max-width:92vw; max-height:88vh;
     touch-action:none; user-select:none; -webkit-user-select:none;
@@ -830,12 +932,18 @@
 </head>
 <body>
 <div class="app-shell">
+  <div id="tcg-app">
 
   <!-- DASHBOARD -->
   <div class="screen active" id="screen-dashboard">
     <div class="app-header">
       <div class="wordmark"><span class="dot"></span>TangStash</div>
       <div class="icon-btn" onclick="openSettingsModal()" title="Settings">⚙</div>
+    </div>
+
+    <div class="mode-switch-row">
+      <div class="mode-switch-btn active" onclick="switchAppMode('tcg')">OPTCG</div>
+      <div class="mode-switch-btn" onclick="switchAppMode('goods')">GOODS</div>
     </div>
 
     <div class="hero-card">
@@ -1212,6 +1320,287 @@
       <div class="nav-item"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21a8 8 0 00-16 0"/><circle cx="12" cy="7" r="4"/></svg>Me</div>
     </div>
   </div>
+  </div>
+
+  <!-- ================= GOODS (non-TCG merch) app ================= -->
+  <!-- A second, simpler mode alongside TCG — same app-shell, own
+       screens/nav, switched via switchAppMode() (see app.js). No
+       Binder/Me equivalent and no market pricing, per how this mode is
+       scoped: just tracking things bought, what they cost, and where
+       they came from. Uses .goods-screen (not .screen) so TCG's own
+       showScreen()/document.querySelectorAll(".screen") never
+       interacts with these — the two mode's screen-switching logic
+       stays fully independent, on purpose, to avoid any chance of one
+       mode's navigation code accidentally touching the other's. -->
+  <div id="goods-app" style="display:none;">
+
+  <!-- GOODS DASHBOARD -->
+  <div class="goods-screen active" id="goods-screen-dashboard">
+    <div class="app-header">
+      <div class="wordmark"><span class="dot"></span>TangStash</div>
+      <div class="icon-btn" onclick="openSettingsModal()" title="Settings">⚙</div>
+    </div>
+
+    <div class="mode-switch-row">
+      <div class="mode-switch-btn" onclick="switchAppMode('tcg')">OPTCG</div>
+      <div class="mode-switch-btn active" onclick="switchAppMode('goods')">GOODS</div>
+    </div>
+
+    <div class="hero-card">
+      <div class="hero-label">Total Spent</div>
+      <div class="hero-value" id="goods-hero-value">S$0.00</div>
+      <div class="hero-sub-text" id="goods-hero-pending">Pending Delivery: S$0.00</div>
+    </div>
+
+    <div class="goods-stat-grid">
+      <div class="stat-card" style="cursor:pointer;" onclick="goToGoodsInventoryFiltered({listing:'Purchased'})"><div class="stat-num" id="goods-stat-total">0</div><div class="stat-name">Total items</div></div>
+      <div class="stat-card" style="cursor:pointer;" onclick="goToGoodsInventoryFiltered({listing:'Purchased'})"><div class="stat-num" id="goods-stat-unique">0</div><div class="stat-name">Unique items</div></div>
+      <div class="stat-card" style="cursor:pointer;" onclick="showGoodsScreen('pending')"><div class="stat-num" id="goods-stat-pending">0</div><div class="stat-name">Pending delivery</div></div>
+      <div class="stat-card" style="cursor:pointer;" onclick="showGoodsScreen('wanted')"><div class="stat-num" id="goods-stat-wanted">0</div><div class="stat-name">Wanted</div></div>
+    </div>
+
+    <div class="section-label">Recently added</div>
+    <div id="goods-recent"><div class="inv-loading" style="margin:0 22px 14px;">Loading…</div></div>
+
+        <div class="bottom-nav">
+      <div class="nav-item" data-goods-screen="dashboard" onclick="showGoodsScreen('dashboard')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-8 9 8M5 10v10h14V10"/></svg>Home</div>
+      <div class="nav-item" data-goods-screen="inventory" onclick="showGoodsScreen('inventory')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>Inventory</div>
+      <div class="nav-item center" data-goods-screen="add" onclick="showGoodsScreen('add')"><div class="nav-icon-wrap"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg></div>Add</div>
+      <div class="nav-item" data-goods-screen="pending" onclick="showGoodsScreen('pending')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>Pending</div>
+      <div class="nav-item" data-goods-screen="wanted" onclick="showGoodsScreen('wanted')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l2.6 5.9 6.4.6-4.8 4.3 1.4 6.2L12 16.9 6.4 20l1.4-6.2-4.8-4.3 6.4-.6z"/></svg>Wanted</div>
+    </div>
+  </div>
+
+  <!-- GOODS INVENTORY -->
+  <div class="goods-screen" id="goods-screen-inventory">
+    <div class="app-header">
+      <div class="wordmark" style="font-size:18px;">Goods</div>
+      <div style="display:flex; gap:8px;">
+        <div class="icon-btn" id="goods-view-toggle-btn" onclick="toggleGoodsViewMode()" title="Switch view">☰</div>
+        <div class="icon-btn" onclick="refreshAllGoods()" title="Refresh"><span id="goods-refresh-icon">↻</span></div>
+        <div class="icon-btn" onclick="triggerGoodsImport()" title="Import from xlsx">⇅</div>
+      </div>
+      <input type="file" id="goods-import-file-input" accept=".xlsx" style="display:none;" onchange="handleGoodsImportFile(this)">
+    </div>
+    <div id="goods-import-status" style="margin: 0 22px 8px; font-family:var(--mono); font-size:10.5px; color:var(--teal);"></div>
+
+    <div class="search-bar" style="margin:0 22px 12px;">
+      🔍 &nbsp;<input id="goods-search-input" oninput="onGoodsSearch(this.value)" placeholder="Search by name or brand…" style="background:none; border:none; outline:none; color:var(--text); font-family:var(--body); font-size:16px; flex:1;">
+    </div>
+    <div style="margin: -8px 22px 12px; font-family:var(--mono); font-size:10px; color:var(--text-faint);">
+      Need the update/import template? <a href="tangstash-goods-import-template.xlsx" download style="color:var(--teal);">Download it here</a> or <a href="#" onclick="event.preventDefault(); exportGoodsTemplate();" style="color:var(--teal);">Export it here</a>.
+    </div>
+
+    <div class="filter-row">
+      <div class="filter-item">
+        <div class="filter-pill" id="gfp-listing" onclick="toggleGoodsFilterMenu('listing')">Listing: All</div>
+        <div class="filter-dropdown" id="gfd-listing">
+          <div class="filter-option selected" onclick="selectGoodsFilter('listing','All', this)">All</div>
+          <div class="filter-option" onclick="selectGoodsFilter('listing','Purchased', this)">Purchased</div>
+          <div class="filter-option" onclick="selectGoodsFilter('listing','Pending Delivery', this)">Pending Delivery</div>
+          <div class="filter-option" onclick="selectGoodsFilter('listing','Wanted', this)">Wanted</div>
+        </div>
+      </div>
+      <div class="filter-item">
+        <div class="filter-pill" id="gfp-productType" onclick="toggleGoodsFilterMenu('productType')">Type: All</div>
+        <div class="filter-dropdown" id="gfd-productType"></div>
+      </div>
+      <div class="filter-item">
+        <div class="filter-pill" id="gfp-source" onclick="toggleGoodsFilterMenu('source')">Source: All</div>
+        <div class="filter-dropdown" id="gfd-source"></div>
+      </div>
+      <div class="filter-item">
+        <div class="filter-pill" id="gfp-series" onclick="toggleGoodsFilterMenu('series')">Series: All</div>
+        <div class="filter-dropdown" id="gfd-series"></div>
+      </div>
+    </div>
+
+    <div id="goods-list" class="goods-swipeable-list"><div class="inv-loading" style="margin:0 22px 14px;">Loading…</div></div>
+
+        <div class="bottom-nav">
+      <div class="nav-item" data-goods-screen="dashboard" onclick="showGoodsScreen('dashboard')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-8 9 8M5 10v10h14V10"/></svg>Home</div>
+      <div class="nav-item" data-goods-screen="inventory" onclick="showGoodsScreen('inventory')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>Inventory</div>
+      <div class="nav-item center" data-goods-screen="add" onclick="showGoodsScreen('add')"><div class="nav-icon-wrap"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg></div>Add</div>
+      <div class="nav-item" data-goods-screen="pending" onclick="showGoodsScreen('pending')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>Pending</div>
+      <div class="nav-item" data-goods-screen="wanted" onclick="showGoodsScreen('wanted')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l2.6 5.9 6.4.6-4.8 4.3 1.4 6.2L12 16.9 6.4 20l1.4-6.2-4.8-4.3 6.4-.6z"/></svg>Wanted</div>
+    </div>
+  </div>
+
+  <!-- GOODS PENDING — a fixed-filter view of the same Inventory data
+       (status = Pending Delivery), not a separate dataset. Reuses
+       goodsGroupKey()/renderGoodsGroup()/renderGoodsRow() — the exact
+       same grouping/row rendering Inventory uses — so swipe-to-clone/
+       delete and tap-for-detail behave identically here. List-only, no
+       Tile toggle and no Product Type/Source/Series filters — those
+       stay Inventory-specific; this screen's whole purpose is "just the
+       pending ones", not another general-purpose browse view. -->
+  <div class="goods-screen" id="goods-screen-pending">
+    <div class="app-header">
+      <div class="wordmark" style="font-size:18px;">Pending Delivery</div>
+      <div style="display:flex; gap:8px;">
+        <div class="icon-btn" id="goods-pending-view-toggle-btn" onclick="toggleGoodsViewMode()" title="Switch view">☰</div>
+        <div class="icon-btn" onclick="refreshAllGoods()" title="Refresh"><span id="goods-pending-refresh-icon">↻</span></div>
+      </div>
+    </div>
+    <div id="goods-pending-list" class="goods-swipeable-list"><div class="inv-loading" style="margin:0 22px 14px;">Loading…</div></div>
+
+        <div class="bottom-nav">
+      <div class="nav-item" data-goods-screen="dashboard" onclick="showGoodsScreen('dashboard')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-8 9 8M5 10v10h14V10"/></svg>Home</div>
+      <div class="nav-item" data-goods-screen="inventory" onclick="showGoodsScreen('inventory')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>Inventory</div>
+      <div class="nav-item center" data-goods-screen="add" onclick="showGoodsScreen('add')"><div class="nav-icon-wrap"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg></div>Add</div>
+      <div class="nav-item" data-goods-screen="pending" onclick="showGoodsScreen('pending')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>Pending</div>
+      <div class="nav-item" data-goods-screen="wanted" onclick="showGoodsScreen('wanted')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l2.6 5.9 6.4.6-4.8 4.3 1.4 6.2L12 16.9 6.4 20l1.4-6.2-4.8-4.3 6.4-.6z"/></svg>Wanted</div>
+    </div>
+  </div>
+
+  <!-- GOODS WANTED — same idea as Pending above, status = Wanted. -->
+  <div class="goods-screen" id="goods-screen-wanted">
+    <div class="app-header">
+      <div class="wordmark" style="font-size:18px;">Wanted</div>
+      <div style="display:flex; gap:8px;">
+        <div class="icon-btn" id="goods-wanted-view-toggle-btn" onclick="toggleGoodsViewMode()" title="Switch view">☰</div>
+        <div class="icon-btn" onclick="refreshAllGoods()" title="Refresh"><span id="goods-wanted-refresh-icon">↻</span></div>
+      </div>
+    </div>
+    <div id="goods-wanted-list" class="goods-swipeable-list"><div class="inv-loading" style="margin:0 22px 14px;">Loading…</div></div>
+
+        <div class="bottom-nav">
+      <div class="nav-item" data-goods-screen="dashboard" onclick="showGoodsScreen('dashboard')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-8 9 8M5 10v10h14V10"/></svg>Home</div>
+      <div class="nav-item" data-goods-screen="inventory" onclick="showGoodsScreen('inventory')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>Inventory</div>
+      <div class="nav-item center" data-goods-screen="add" onclick="showGoodsScreen('add')"><div class="nav-icon-wrap"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg></div>Add</div>
+      <div class="nav-item" data-goods-screen="pending" onclick="showGoodsScreen('pending')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>Pending</div>
+      <div class="nav-item" data-goods-screen="wanted" onclick="showGoodsScreen('wanted')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l2.6 5.9 6.4.6-4.8 4.3 1.4 6.2L12 16.9 6.4 20l1.4-6.2-4.8-4.3 6.4-.6z"/></svg>Wanted</div>
+    </div>
+  </div>
+
+  <!-- GOODS ADD (stub for Phase 1 — full form comes next) -->
+  <div class="goods-screen" id="goods-screen-add">
+    <div class="app-header">
+      <div class="wordmark" style="font-size:18px;">Add Item</div>
+      <div class="icon-btn" onclick="resetGoodsAddForm(); showGoodsScreen('dashboard')" title="Cancel">✕</div>
+    </div>
+
+    <div class="field-group" style="padding-bottom:4px;">
+      <div class="field-label" style="margin-top:0;">Hero Image</div>
+      <div class="form-row" style="margin-bottom:6px; gap:8px;">
+        <label class="fetch-btn" style="flex:1; display:flex; align-items:center; justify-content:center; padding:10px; text-align:center;">
+          📁 Upload
+          <input type="file" id="goods-hero-file" accept="image/*" style="display:none;" onchange="setGoodsHeroFromFile(this)">
+        </label>
+        <label class="fetch-btn" style="flex:1; display:flex; align-items:center; justify-content:center; padding:10px; text-align:center;">
+          📷 Camera
+          <input type="file" id="goods-hero-camera" accept="image/*" capture="environment" style="display:none;" onchange="setGoodsHeroFromFile(this)">
+        </label>
+      </div>
+      <div class="url-row" style="margin-bottom:6px;">
+        <input class="url-input" id="goods-hero-link" placeholder="Or paste an image link…" oninput="updateGoodsHeroPreview(this.value)">
+      </div>
+      <div id="goods-hero-preview" class="goods-thumb" style="display:none; width:80px; height:80px; margin-bottom:10px;"></div>
+
+      <div class="field-label">Name</div>
+      <div class="form-row" style="margin-bottom:8px;">
+        <input class="form-input" id="goods-name" placeholder="Name (e.g. Hi-Chew Cushion)">
+      </div>
+
+      <div class="field-label">Sub-name</div>
+      <div class="form-row" style="margin-bottom:8px;">
+        <input class="form-input" id="goods-sub-name" placeholder="Sub-name (optional — e.g. Strawberry)">
+      </div>
+
+      <div class="field-label">Brand</div>
+      <div class="form-row" style="margin-bottom:8px;">
+        <input class="form-input" id="goods-brand" placeholder="Brand (e.g. Morinaga)">
+      </div>
+
+      <div class="form-row" style="margin-bottom:8px;">
+        <input class="form-input" id="goods-product-type" placeholder="Product type (e.g. Cushion)" style="flex:1;">
+        <input class="form-input" id="goods-series" placeholder="Series / Franchise" style="flex:1;">
+      </div>
+
+      <div class="field-label">Source</div>
+      <div class="form-row" style="margin-bottom:6px;">
+        <input class="form-input" id="goods-source" placeholder="Source (e.g. Ichiban Kuji, Amazon, Mercari)">
+      </div>
+      <div class="field-label">Set type</div>
+      <div class="form-row" style="margin-bottom:8px;">
+        <select class="form-input" id="goods-set-type">
+          <option value="">Set type…</option>
+          <option value="Full Set">Full Set</option>
+          <option value="Partial">Partial</option>
+          <option value="Singles">Singles</option>
+        </select>
+      </div>
+
+      <div class="field-label">Remarks</div>
+      <div class="form-row" style="margin-bottom:8px;">
+        <input class="form-input" id="goods-remarks" placeholder="e.g. Ichiban Kuji Morinaga &amp; Co., Last Prize">
+      </div>
+
+      <div class="field-label">Purchase price</div>
+      <div class="form-row" style="margin-bottom:8px;">
+        <input class="form-input" id="goods-purchase-price" placeholder="Purchase price (blank = Wanted)">
+        <select class="form-input" id="goods-purchase-currency" style="flex:0 0 90px;">
+          <option value="JPY" selected>JPY</option>
+          <option value="SGD">SGD</option>
+          <option value="AUD">AUD</option>
+          <option value="RMB">RMB</option>
+          <option value="MYR">MYR</option>
+          <option value="USD">USD</option>
+        </select>
+      </div>
+      <label style="display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--text-dim); margin-bottom:8px; padding:0 2px;">
+        <input type="checkbox" id="goods-received-checkbox" checked style="width:16px; height:16px;">
+        Already received (uncheck if a price is set but it hasn't arrived yet — Pending Delivery)
+      </label>
+
+      <div class="form-row" style="margin-bottom:8px;">
+        <div style="flex:1;">
+          <div class="field-label" style="padding:0; margin:0 0 4px;">Purchase date</div>
+          <input class="form-input" type="date" id="goods-purchase-date">
+        </div>
+        <div style="flex:0 0 100px;">
+          <div class="field-label" style="padding:0; margin:0 0 4px;">Quantity</div>
+          <input class="form-input" type="number" min="0" id="goods-quantity" placeholder="1">
+        </div>
+      </div>
+
+      <div class="field-label">References link</div>
+      <div class="form-row" style="margin-bottom:8px;">
+        <input class="form-input" id="goods-reference-link" placeholder="e.g. https://1kuji.com/products/…">
+      </div>
+
+      <div class="field-label" style="margin-top:14px;">Additional images (optional — supports GIF)</div>
+      <div class="form-row" style="margin-bottom:6px; gap:8px;">
+        <label class="fetch-btn" style="flex:1; display:flex; align-items:center; justify-content:center; padding:10px; text-align:center;">
+          📁 Upload
+          <input type="file" id="goods-extra-photos-file" accept="image/*" multiple style="display:none;" onchange="addGoodsExtraPhotoFiles(this)">
+        </label>
+        <label class="fetch-btn" style="flex:1; display:flex; align-items:center; justify-content:center; padding:10px; text-align:center;">
+          📷 Camera
+          <input type="file" id="goods-extra-photos-camera" accept="image/*" capture="environment" style="display:none;" onchange="addGoodsExtraPhotoFiles(this)">
+        </label>
+      </div>
+      <div class="url-row" style="margin-bottom:6px;">
+        <input class="url-input" id="goods-extra-photo-link" placeholder="Or paste an image link…">
+        <button class="fetch-btn" onclick="addGoodsExtraPhotoLink()">Add</button>
+      </div>
+      <div id="goods-extra-photos-preview" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:4px;"></div>
+    </div>
+
+    <div id="goods-add-status" style="margin: 4px 22px 0; font-family:var(--mono); font-size:11px; color:var(--teal);"></div>
+    <button class="save-btn" onclick="saveGoodsItem()">Save to inventory</button>
+
+        <div class="bottom-nav">
+      <div class="nav-item" data-goods-screen="dashboard" onclick="showGoodsScreen('dashboard')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-8 9 8M5 10v10h14V10"/></svg>Home</div>
+      <div class="nav-item" data-goods-screen="inventory" onclick="showGoodsScreen('inventory')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>Inventory</div>
+      <div class="nav-item center" data-goods-screen="add" onclick="showGoodsScreen('add')"><div class="nav-icon-wrap"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg></div>Add</div>
+      <div class="nav-item" data-goods-screen="pending" onclick="showGoodsScreen('pending')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>Pending</div>
+      <div class="nav-item" data-goods-screen="wanted" onclick="showGoodsScreen('wanted')"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l2.6 5.9 6.4.6-4.8 4.3 1.4 6.2L12 16.9 6.4 20l1.4-6.2-4.8-4.3 6.4-.6z"/></svg>Wanted</div>
+    </div>
+  </div>
+
+  </div>
+
 
   <!-- Shared modal layer: all modal-backdrops live here as direct
        children of .app-shell, not nested inside any one .screen.
@@ -1366,6 +1755,88 @@
         <input class="form-input" id="slot-picker-search" placeholder="Search by name or number…" style="margin:10px 0;" oninput="onSlotPickerSearch(this.value)">
         <div id="slot-picker-results" style="max-height:340px; overflow-y:auto;"></div>
       </div>
+    </div>
+
+    <!-- Goods item detail/edit — same structure as TCG's price-modal
+         (gallery, details grid, pencil-to-edit-everything, pricing row)
+         but simpler: no Market Price/source rows since Goods has no
+         market pricing at all, and everything is editable (no "except
+         binder placement" carve-out — Goods has no binder concept). -->
+    <div class="modal-backdrop" id="goods-detail-modal" onpointerdown="armBackdropDismiss(event)" onclick="dismissBackdropIfArmed(event, closeGoodsDetail)">
+      <div class="modal-sheet">
+        <div class="modal-handle"></div>
+        <div class="modal-title-row">
+          <div class="modal-title" id="gd-title">Item name</div>
+          <div class="modal-close" onclick="closeGoodsDetail()">✕</div>
+        </div>
+        <div id="gd-status-badge" class="pm-status-badge">Purchased</div>
+        <div id="gd-gallery" style="display:none; gap:8px; overflow-x:auto; padding:2px 0 12px;"></div>
+        <div style="display:flex; align-items:center; justify-content:space-between; margin:2px 0 6px;">
+          <div class="section-label" style="padding:0; margin:0;">Details</div>
+          <div class="modal-close" id="gd-edit-toggle-btn" onclick="toggleGoodsDetailEdit()" title="Edit">✎</div>
+        </div>
+        <div id="gd-details" class="pm-details-grid"></div>
+        <div id="gd-edit-form" style="display:none;"></div>
+        <div id="gd-pricing-section">
+          <div class="section-label" style="padding:0; margin:14px 0 6px;">Purchase Price</div>
+          <div id="gd-price-row"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Goods clone — same "everything else copies, fill in these few
+         fields" pattern as TCG's clone-modal, but asking for the fields
+         that actually vary between copies of a Goods item: Set Type,
+         Remarks, and Purchase Price/Currency (blank price clones as a
+         new Wanted listing, same convention as TCG's). -->
+    <div class="modal-backdrop" id="goods-clone-modal" onpointerdown="armBackdropDismiss(event)" onclick="dismissBackdropIfArmed(event, closeGoodsCloneModal)">
+      <div class="modal-sheet">
+        <div class="modal-handle"></div>
+        <div class="modal-title-row">
+          <div class="modal-title" id="gcm-title">Clone item</div>
+          <div class="modal-close" onclick="closeGoodsCloneModal()">✕</div>
+        </div>
+        <div class="modal-footnote" style="margin:0 0 12px;">Everything else copies from the original. Leave Purchase Price blank to clone as a new Wanted listing instead.</div>
+        <div class="form-row" id="gcm-set-type-row" style="margin-bottom:10px;">
+          <select class="form-input" id="gcm-set-type">
+            <option value="">Set type…</option>
+            <option value="Full Set">Full Set</option>
+            <option value="Partial">Partial</option>
+            <option value="Singles">Singles</option>
+          </select>
+        </div>
+        <div class="field-label" style="padding:0;">Remarks</div>
+        <div class="form-row" style="margin-bottom:10px;">
+          <input class="form-input" id="gcm-remarks" placeholder="Remarks">
+        </div>
+        <div class="field-label" style="padding:0;">Purchase price</div>
+        <div class="form-row" style="margin-bottom:10px;">
+          <input class="form-input" id="gcm-purchase-price" placeholder="0.00" style="flex:1;">
+          <select class="form-input" id="gcm-purchase-currency" style="flex:0 0 90px;">
+            <option value="JPY">JPY</option>
+            <option value="SGD">SGD</option>
+            <option value="AUD">AUD</option>
+            <option value="RMB">RMB</option>
+            <option value="MYR">MYR</option>
+            <option value="USD">USD</option>
+          </select>
+        </div>
+        <div id="gcm-status" style="margin:0 0 8px; font-family:var(--mono); font-size:10.5px; color:var(--teal);"></div>
+        <button class="save-btn" onclick="submitGoodsClone()">Save clone</button>
+      </div>
+    </div>
+
+
+    <!-- In-app viewer for Reference Link (Goods) — see the CSS comment
+         above .link-viewer-backdrop for why "Open in browser" is always
+         shown, not just offered on failure. -->
+    <div class="link-viewer-backdrop" id="link-viewer-modal">
+      <div class="link-viewer-header">
+        <div class="link-viewer-url" id="link-viewer-url">Loading…</div>
+        <a id="link-viewer-external" href="#" target="_blank" rel="noopener" class="modal-close" title="Open in browser">⤴</a>
+        <div class="modal-close" onclick="closeLinkViewer()">✕</div>
+      </div>
+      <iframe id="link-viewer-frame" src="" title="Reference link"></iframe>
     </div>
 
     <!-- Full-screen zoomable photo viewer, opened by tapping a thumbnail
