@@ -73,9 +73,6 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   await Promise.all([loadInventory(), loadBinders(), loadFxRates()]);
   renderDashboard();
-  renderInventory();
-  renderMainBinder();
-  renderAutoBinders();
   renderCustomBinderSwitcher();
   setupBinderSwipe();
   resetGoodsAddForm(); // just to pre-fill Purchase Date with today — no data loaded/lost, Goods loads lazily on first switch into that mode (see switchAppMode)
@@ -204,12 +201,16 @@ async function apiJson(url, opts) {
   return data;
 }
 
+// Only re-renders Inventory/Binder if that's the screen currently
+// visible — see showScreen()'s comment above for the full reasoning.
+// renderDashboard() stays unconditional; it's cheap (a handful of
+// numbers and a short recent-cards list, not the full inventory).
 async function refreshAll() {
   await Promise.all([loadInventory(), loadBinders()]);
   renderDashboard();
-  renderInventory();
-  renderMainBinder();
-  renderAutoBinders();
+  const activeId = document.querySelector("#tcg-app .screen.active")?.id;
+  if (activeId === "screen-inventory") renderInventory();
+  if (activeId === "screen-binder") { renderMainBinder(); renderAutoBinders(); }
 }
 
 // ---- Currency conversion ---------------------------------------------------
@@ -3773,12 +3774,28 @@ async function deleteBinder(key) {
 
 // ---- Screen navigation -------------------------------------------------------
 
+// Renders Inventory/Binder lazily, only when actually navigating TO
+// one of them, rather than always eagerly at boot and after every
+// refreshAll() regardless of which screen is even visible. Found via a
+// real reported symptom at production scale (~2000 TCG listings):
+// switching into Goods mode felt laggy, and the actual cause traced
+// back to TCG's own boot sequence — it was unconditionally building the
+// full Inventory list (thousands of DOM nodes, each row with 4 pointer
+// listeners for swipe-to-clone/delete) and the Main Binder/auto-binders
+// every single time the app loaded or any save/delete/import ran,
+// whether or not the person was ever looking at those screens. That
+// eager cost was still landing (or hadn't finished settling) right as
+// the very next thing most sessions do — glance around, then hit
+// Goods — happened, which is exactly what made it look like a Goods
+// problem when the actual work was all on the TCG side.
 function showScreen(name) {
   document.querySelectorAll(".screen").forEach((s) => s.classList.remove("active"));
   document.getElementById("screen-" + name).classList.add("active");
   document.querySelectorAll(".nav-item[data-screen]").forEach((item) => {
     item.classList.toggle("active", item.dataset.screen === name);
   });
+  if (name === "inventory") renderInventory();
+  if (name === "binder") { renderMainBinder(); renderAutoBinders(); }
   window.scrollTo({ top: 0, behavior: "instant" in window ? "instant" : "auto" });
 }
 
